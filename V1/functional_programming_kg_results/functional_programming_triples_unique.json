@@ -1,0 +1,92 @@
+[
+  {
+    "subject": {"name": "函数式编程", "type": "概念"},
+    "predicate": "定义",
+    "object": {"name": "声明式编程范式", "type": "概念"},
+    "source": "教材"
+  },
+  {
+    "subject": {"name": "Lambda表达式", "type": "语言"},
+    "predicate": "属于",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "文档"
+  },
+  {
+    "subject": {"name": "高阶函数", "type": "方法"},
+    "predicate": "使用",
+    "object": {"name": "函数作为参数", "type": "技术"},
+    "source": "案例"
+  },
+  {
+    "subject": {"name": "不可变数据", "type": "原则"},
+    "predicate": "属于",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "教材"
+  },
+  {
+    "subject": {"name": "Map函数", "type": "方法"},
+    "predicate": "属于",
+    "object": {"name": "高阶函数", "type": "方法"},
+    "source": "文档"
+  },
+  {
+    "subject": {"name": "Filter函数", "type": "方法"},
+    "predicate": "属于",
+    "object": {"name": "高阶函数", "type": "方法"},
+    "source": "文档"
+  },
+  {
+    "subject": {"name": "Reduce函数", "type": "方法"},
+    "predicate": "属于",
+    "object": {"name": "高阶函数", "type": "方法"},
+    "source": "文档"
+  },
+  {
+    "subject": {"name": "Python", "type": "语言"},
+    "predicate": "支持",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "官方文档"
+  },
+  {
+    "subject": {"name": "JavaScript", "type": "语言"},
+    "predicate": "支持",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "官方文档"
+  },
+  {
+    "subject": {"name": "Lisp", "type": "语言"},
+    "predicate": "基于",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "历史记录"
+  },
+  {
+    "subject": {"name": "纯函数", "type": "概念"},
+    "predicate": "属于",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "教材"
+  },
+  {
+    "subject": {"name": "副作用", "type": "概念"},
+    "predicate": "避免",
+    "object": {"name": "纯函数", "type": "概念"},
+    "source": "最佳实践"
+  },
+  {
+    "subject": {"name": "函数组合", "type": "方法"},
+    "predicate": "属于",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "教材"
+  },
+  {
+    "subject": {"name": "柯里化", "type": "技术"},
+    "predicate": "支持",
+    "object": {"name": "函数组合", "type": "方法"},
+    "source": "文档"
+  },
+  {
+    "subject": {"name": "偏函数", "type": "技术"},
+    "predicate": "属于",
+    "object": {"name": "函数式编程", "type": "概念"},
+    "source": "教材"
+  }
+]
