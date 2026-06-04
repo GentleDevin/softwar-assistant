@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
+import logging
 import re
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -8,6 +9,15 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import Tool
 from langchain_openai import ChatOpenAI
+
+# 配置日志
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 class Agent:
@@ -58,7 +68,7 @@ class Agent:
             )
             return chain.invoke(prompt_vars)["text"]
         except Exception as e:
-            print(f"{self.name}调用LLM时出错: {e}")
+            logger.error(f"{self.name}调用LLM时出错: {e}")
             return f"抱歉，在生成回答时遇到了问题：{e}。"
     
     def _get_prompt_template(self) -> PromptTemplate:
@@ -478,8 +488,8 @@ def select_agents_function(query: str, entities: List[Dict[str, str]], llm: Chat
             if json_match:
                 try:
                     selected_agents_data = json.loads(json_match.group(0))
-                except:
-                    print("无法从LLM响应中提取有效的JSON")
+                except Exception as inner_e:
+                    logger.error(f"无法从LLM响应中提取有效的JSON: {inner_e}")
                     selected_agents_data = []
             else:
                 selected_agents_data = []
@@ -509,7 +519,7 @@ def select_agents_function(query: str, entities: List[Dict[str, str]], llm: Chat
         return json.dumps(valid_selections, ensure_ascii=False)
         
     except Exception as e:
-        print(f"智能体选择出错: {e}")
+        logger.error(f"智能体选择出错: {e}")
         return json.dumps([{
             "agent": "概念解释智能体", 
             "relevance": 1.0,
@@ -563,7 +573,7 @@ def synthesize_answers_function(answers_json: str, query: str, llm: ChatOpenAI) 
         return response.content.strip()
         
     except Exception as e:
-        print(f"答案合成出错: {e}")
+        logger.error(f"答案合成出错: {e}")
         
         # 如果解析失败但字符串看起来像单个答案，则直接返回
         if isinstance(answers_json, str) and len(answers_json) > 100 and not answers_json.startswith('['):
@@ -591,7 +601,7 @@ class AgentCoordinator:
             CodeImplementationAgent(self.llm),
             SoftwareEthicsAgent(self.llm)
         ]
-        print(f"AgentCoordinator: 初始化了 {len(self.agents)} 个智能体")
+        logger.info(f"AgentCoordinator: 初始化了 {len(self.agents)} 个智能体")
     
     def get_agent_by_name(self, name: str) -> Optional[Agent]:
         """根据名称获取智能体"""
@@ -626,7 +636,7 @@ class AgentCoordinator:
             return selected_agents
             
         except Exception as e:
-            print(f"解析智能体选择结果时出错: {e}")
+            logger.error(f"解析智能体选择结果时出错: {e}")
             # 出错时选择第一个智能体（概念解释智能体）
             return [(self.agents[0], 1.0)]
     
@@ -652,7 +662,7 @@ class AgentCoordinator:
             # 多个智能体处理
             answers_data = []
             for agent, relevance in selected_agents:
-                print(f"智能体 {agent.name} 正在处理问题 (相关性: {relevance:.2f})...")
+                logger.info(f"智能体 {agent.name} 正在处理问题 (相关性: {relevance:.2f})...")
                 answer = agent.process(question, kg_context, entities, doc_results, conversation_history)
                 answers_data.append({
                     "agent": agent.name,
@@ -676,7 +686,7 @@ class AgentCoordinator:
             return final_answer, combined_name
             
         except Exception as e:
-            print(f"智能体协调处理出错: {e}")
+            logger.error(f"智能体协调处理出错: {e}")
             # 出错时使用概念解释智能体作为应急方案
             fallback_agent = self.get_agent_by_name("概念解释智能体") or self.agents[0]
             fallback_answer = fallback_agent.process(question, kg_context, entities, doc_results, conversation_history)

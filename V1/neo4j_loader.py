@@ -1,9 +1,19 @@
 import json
+import logging
+import os
 import re
 import sys
 from pathlib import Path
 
 from neo4j import GraphDatabase
+
+# 导入统一配置模块
+from config import get_neo4j_config, get_log_config
+from utils import setup_logger
+
+# 配置日志
+log_config = get_log_config()
+logger = setup_logger(__name__, log_file=log_config.log_file, log_level=log_config.log_level)
 
 # 定义函数编程的实体类型
 ENTITY_TYPES = [
@@ -43,25 +53,25 @@ class Neo4jHandler:
             with self.driver.session() as session:
                 result = session.run("RETURN 1")
                 result.single()
-            print("成功连接到Neo4j数据库")
+            logger.info("成功连接到Neo4j数据库")
         except Exception as e:
-            print(f"连接Neo4j失败: {e}")
+            logger.error(f"连接Neo4j失败: {e}")
             raise
 
     def close(self):
         """关闭Neo4j连接"""
         if self.driver:
             self.driver.close()
-            print("Neo4j连接已关闭")
+            logger.info("Neo4j连接已关闭")
 
     def clear_database(self):
         """从数据库中删除所有节点和关系"""
         try:
             with self.driver.session() as session:
                 session.run("MATCH (n) DETACH DELETE n")
-                print("数据库已清空")
+                logger.info("数据库已清空")
         except Exception as e:
-            print(f"清空数据库时出错: {e}")
+            logger.error(f"清空数据库时出错: {e}")
 
     def create_constraints(self):
         """为实体类型创建约束"""
@@ -83,12 +93,12 @@ class Neo4jHandler:
                                 # Neo4j 3.x
                                 session.run(f"CREATE CONSTRAINT ON (n:`{clean_type}`) ASSERT n.name IS UNIQUE")
                             except:
-                                print(f"无法为{clean_type}创建约束，跳过")
+                                logger.warning(f"无法为{clean_type}创建约束，跳过")
                     except Exception as e:
-                        print(f"为{clean_type}创建约束时出错: {e}")
-                print("已为所有实体类型创建约束")
+                        logger.error(f"为{clean_type}创建约束时出错: {e}")
+                logger.info("已为所有实体类型创建约束")
         except Exception as e:
-            print(f"设置约束时出错: {e}")
+            logger.error(f"设置约束时出错: {e}")
 
     def validate_triples(self, triples):
         """验证三元组数据的有效性，并修复可能导致错误的记录"""
@@ -99,17 +109,17 @@ class Neo4jHandler:
             try:
                 # 确保所有必要的字段都存在
                 if not all(key in triple for key in ["subject", "predicate", "object"]):
-                    print(f"跳过缺少必要字段的三元组: {triple}")
+                    logger.warning(f"跳过缺少必要字段的三元组: {triple}")
                     invalid_count += 1
                     continue
 
                 if not all(key in triple["subject"] for key in ["name", "type"]):
-                    print(f"跳过主体缺少必要字段的三元组: {triple}")
+                    logger.warning(f"跳过主体缺少必要字段的三元组: {triple}")
                     invalid_count += 1
                     continue
 
                 if not all(key in triple["object"] for key in ["name", "type"]):
-                    print(f"跳过客体缺少必要字段的三元组: {triple}")
+                    logger.warning(f"跳过客体缺少必要字段的三元组: {triple}")
                     invalid_count += 1
                     continue
 
@@ -121,19 +131,19 @@ class Neo4jHandler:
                 clean_object_type = re.sub(r'[^\w\u4e00-\u9fa5]', '', object_type)
 
                 if not clean_subject_type:
-                    print(f"修复主体类型为空的三元组: {triple}")
+                    logger.warning(f"修复主体类型为空的三元组: {triple}")
                     triple["subject"]["type"] = "未知类型"
 
                 if not clean_object_type:
-                    print(f"修复客体类型为空的三元组: {triple}")
+                    logger.warning(f"修复客体类型为空的三元组: {triple}")
                     triple["object"]["type"] = "未知类型"
 
                 fixed_triples.append(triple)
             except Exception as e:
-                print(f"验证三元组时出错: {e}, 三元组: {triple}")
+                logger.error(f"验证三元组时出错: {e}, 三元组: {triple}")
                 invalid_count += 1
 
-        print(f"验证完成: 有效三元组 {len(fixed_triples)}, 无效/已修复三元组 {invalid_count}")
+        logger.info(f"验证完成: 有效三元组 {len(fixed_triples)}, 无效/已修复三元组 {invalid_count}")
         return fixed_triples
 
     def add_triples_batch(self, triples, batch_size=100):
@@ -212,10 +222,10 @@ class Neo4jHandler:
                         tx.commit()
                         successful += len(batch)
 
-                print(f"已添加 {i+len(batch)}/{total} 个三元组")
+                logger.info(f"已添加 {i+len(batch)}/{total} 个三元组")
 
             except Exception as e:
-                print(f"添加三元组批次 {i//batch_size + 1} 时出错: {e}")
+                logger.error(f"添加三元组批次 {i//batch_size + 1} 时出错: {e}")
 
         return successful
 
@@ -247,7 +257,7 @@ class Neo4jHandler:
 
                 return stats
         except Exception as e:
-            print(f"获取统计信息时出错: {e}")
+            logger.error(f"获取统计信息时出错: {e}")
             return {"error": str(e)}
 
 
@@ -270,8 +280,8 @@ def load_triples_to_neo4j(triples_json_path, neo4j_uri, neo4j_username, neo4j_pa
     # 检查文件是否存在
     triples_path = Path(triples_json_path)
     if not triples_path.exists():
-        print(f"错误：文件不存在: {triples_json_path}")
-        print(f"请确保文件位于: {triples_path.absolute()}")
+        logger.error(f"错误：文件不存在: {triples_json_path}")
+        logger.error(f"请确保文件位于: {triples_path.absolute()}")
         return {"error": f"文件不存在: {triples_json_path}"}
 
     # 从JSON加载三元组
@@ -279,12 +289,12 @@ def load_triples_to_neo4j(triples_json_path, neo4j_uri, neo4j_username, neo4j_pa
         with open(triples_json_path, 'r', encoding='utf-8') as f:
             triples = json.load(f)
 
-        print(f"✓ 已从 {triples_json_path} 加载 {len(triples)} 个三元组")
+        logger.info(f"✓ 已从 {triples_json_path} 加载 {len(triples)} 个三元组")
     except json.JSONDecodeError as e:
-        print(f"✗ JSON 解析错误: {e}")
+        logger.error(f"✗ JSON 解析错误: {e}")
         return {"error": f"JSON 解析失败: {e}"}
     except Exception as e:
-        print(f"✗ 从 {triples_json_path} 加载三元组时出错: {e}")
+        logger.error(f"✗ 从 {triples_json_path} 加载三元组时出错: {e}")
         return {"error": str(e)}
 
     # 初始化Neo4j处理器
@@ -293,11 +303,11 @@ def load_triples_to_neo4j(triples_json_path, neo4j_uri, neo4j_username, neo4j_pa
     try:
         neo4j_handler.connect()
     except Exception as e:
-        print(f"✗ 无法连接到 Neo4j: {e}")
-        print(f"  请检查:")
-        print(f"  1. Neo4j 服务是否正在运行")
-        print(f"  2. URI 是否正确: {neo4j_uri}")
-        print(f"  3. 用户名和密码是否正确")
+        logger.error(f"✗ 无法连接到 Neo4j: {e}")
+        logger.error(f"  请检查:")
+        logger.error(f"  1. Neo4j 服务是否正在运行")
+        logger.error(f"  2. URI 是否正确: {neo4j_uri}")
+        logger.error(f"  3. 用户名和密码是否正确")
         return {"error": f"Neo4j 连接失败: {e}"}
 
     try:
@@ -309,7 +319,7 @@ def load_triples_to_neo4j(triples_json_path, neo4j_uri, neo4j_username, neo4j_pa
         neo4j_handler.create_constraints()
 
         # 将三元组添加到数据库
-        print("⏳ 正在将三元组批量添加到Neo4j...")
+        logger.info("⏳ 正在将三元组批量添加到Neo4j...")
         successful_triples = neo4j_handler.add_triples_batch(triples, batch_size=batch_size)
 
         # 获取统计信息
@@ -317,13 +327,13 @@ def load_triples_to_neo4j(triples_json_path, neo4j_uri, neo4j_username, neo4j_pa
         stats["successful_triples"] = successful_triples
         stats["total_triples"] = len(triples)
 
-        print(f"\n✓ 成功添加 {successful_triples}/{len(triples)} 个三元组到Neo4j")
-        print(f"✓ Neo4j 现在包含 {stats['node_count']} 个节点和 {stats['relationship_count']} 个关系")
+        logger.info(f"\n✓ 成功添加 {successful_triples}/{len(triples)} 个三元组到Neo4j")
+        logger.info(f"✓ Neo4j 现在包含 {stats['node_count']} 个节点和 {stats['relationship_count']} 个关系")
 
         return stats
 
     except Exception as e:
-        print(f"✗ 加载过程中出错: {e}")
+        logger.error(f"✗ 加载过程中出错: {e}")
         return {"error": str(e)}
     finally:
         # 关闭Neo4j连接
@@ -333,12 +343,14 @@ def load_triples_to_neo4j(triples_json_path, neo4j_uri, neo4j_username, neo4j_pa
 if __name__ == "__main__":
     """命令行入口 - 支持参数化配置"""
 
-    # 默认配置
+    # 默认配置 - 优先从环境变量获取
+    neo4j_config = get_neo4j_config()
+    
     default_config = {
         "triples_json_path": "functional_programming_kg_results/functional_programming_triples_unique.json",
-        "neo4j_uri": "bolt://localhost:7687",
-        "neo4j_username": "neo4j",
-        "neo4j_password": "neo4j123",
+        "neo4j_uri": neo4j_config.uri,
+        "neo4j_username": neo4j_config.username,
+        "neo4j_password": neo4j_config.password,
         "clear_db": False,
         "batch_size": 100
     }
@@ -351,7 +363,7 @@ if __name__ == "__main__":
             print("  -f, --file PATH              指定三元组 JSON 文件路径")
             print("  -u, --uri URI                指定 Neo4j URI (默认: bolt://localhost:7687)")
             print("  -U, --username USER          指定 Neo4j 用户名 (默认: neo4j)")
-            print("  -p, --password PASS          指定 Neo4j 密码 (默认: neo4j123)")
+            print("  -p, --password PASS          指定 Neo4j 密码")
             print("  --no-clear                   不清空数据库")
             print("  -b, --batch-size SIZE        指定批处理大小 (默认: 100)")
             print("  -h, --help                   显示此帮助信息")
@@ -384,12 +396,12 @@ if __name__ == "__main__":
                     default_config["batch_size"] = int(sys.argv[i + 1])
                     i += 2
                 except ValueError:
-                    print(f"错误: 批处理大小必须是整数")
+                    logger.error(f"错误: 批处理大小必须是整数")
                     sys.exit(1)
             else:
                 i += 1
 
-    # 打印配置信息
+    # 打印配置信息（保持命令行输出）
     print("=" * 60)
     print("Neo4j 三元组加载器")
     print("=" * 60)
@@ -401,6 +413,10 @@ if __name__ == "__main__":
     print(f"  批处理大小: {default_config['batch_size']}")
     print()
 
+    # 记录到日志
+    logger.info(f"Neo4j 三元组加载器启动")
+    logger.info(f"配置: 文件路径={default_config['triples_json_path']}, URI={default_config['neo4j_uri']}, 用户名={default_config['neo4j_username']}")
+
     # 加载三元组到Neo4j
     stats = load_triples_to_neo4j(
         triples_json_path=default_config['triples_json_path'],
@@ -411,7 +427,7 @@ if __name__ == "__main__":
         batch_size=default_config['batch_size']
     )
 
-    # 打印统计信息
+    # 打印统计信息（保持命令行输出）
     if "error" not in stats:
         print("\n" + "=" * 60)
         print("📊 知识图谱统计信息")

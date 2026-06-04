@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import traceback
+import hashlib
 from collections import deque
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -24,7 +25,20 @@ from langchain_core.documents import Document as LangchainDocument
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 # Langchain imports
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+ChatOpenAI = None
+OpenAIEmbeddings = None
+ChatTongyi = None
+DashScopeEmbeddings = None
+
+try:
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+except ImportError:
+    pass
+
+try:
+    from langchain_dashscope import ChatTongyi, DashScopeEmbeddings
+except ImportError:
+    pass
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Neo4j direct import instead of using LangChain's wrapper
 from neo4j import GraphDatabase
@@ -32,13 +46,14 @@ from neo4j import GraphDatabase
 # Import the agent coordinator from our refactored agents.py
 from agents import AgentCoordinator
 
-logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+# 导入统一配置和工具模块
+from config import get_log_config
+from utils import setup_logger
+from utils.formatters import format_search_results_as_html as format_doc_results_html
+
+# 配置日志（包含文件输出）
+log_config = get_log_config()
+logger = setup_logger(__name__, log_file=log_config.log_file, log_level="DEBUG")
 
 
 # 常量定义
@@ -61,10 +76,10 @@ RELATIONSHIP_TYPES = [
 ]
 
 # --- 嵌入模型配置 ---
-RAG_EMBEDDING_MODEL = "text-embedding-v3"
-RAG_EMBEDDING_DIMENSION = 1536
-ENTITY_EMBEDDING_MODEL = "text-embedding-v3"
-ENTITY_EMBEDDING_DIMENSION = 1536
+RAG_EMBEDDING_MODEL = "text-embedding-v4"
+RAG_EMBEDDING_DIMENSION = 1024
+ENTITY_EMBEDDING_MODEL = "text-embedding-v4"
+ENTITY_EMBEDDING_DIMENSION = 1024
 
 
 class RAGManager:
@@ -83,7 +98,8 @@ class RAGManager:
         with cls._lock:
             if cls._instance is None:
                 if embeddings is None:
-                    raise ValueError("首次创建 RAGManager 实例时必须提供 embeddings。")
+                    logger.warning("未提供 embeddings，RAGManager 实例将为 None。")
+                    return None
                 logger.info("使用 embeddings 创建新的 RAGManager 实例。")
                 cls._instance = cls(embeddings)
             return cls._instance
@@ -92,18 +108,121 @@ class RAGManager:
     def __init__(self, embeddings: Embeddings):
         """
         初始化RAG管理器 (需要OpenAI嵌入模型)
+        注意：此方法应由 get_instance 调用，已确保线程安全
         """
-        with RAGManager._lock:
-            if RAGManager._initialized:
-                return
+        if RAGManager._initialized:
+            return
 
-            logger.info("使用 Langchain 和 FAISS 初始化 RAGManager...")
-            self.embeddings = embeddings
+        logger.info("使用 Langchain 和 FAISS 初始化 RAGManager...")
+        self.embeddings = embeddings
+        self.vector_store = None
+        self.document_sources = []  # 存储每个文本块的来源文件名
+        self.is_knowledge_base_loaded = False  # 知识库是否加载成功的标志
+        
+        # FAISS 持久化相关
+        self.faiss_cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "faiss_cache")
+        self.file_hashes_file = os.path.join(self.faiss_cache_dir, "file_hashes.pkl")
+        self.faiss_index_file = os.path.join(self.faiss_cache_dir, "faiss_index")
+        self.file_hashes = {}  # {filename: (file_hash, file_size, last_modified)}
+        
+        # 确保缓存目录存在
+        os.makedirs(self.faiss_cache_dir, exist_ok=True)
+        
+        # 尝试加载已有的文件哈希记录
+        self._load_file_hashes()
+        
+        # 尝试加载已有的FAISS索引
+        self._load_faiss_index()
+        
+        RAGManager._initialized = True
+        logger.info("RAGManager 初始化完成，使用 FAISS 和 Langchain embeddings")
+
+    def _get_content_hash(self, content: str) -> str:
+        """计算文本内容的 SHA256 哈希值"""
+        hash_sha256 = hashlib.sha256()
+        try:
+            hash_sha256.update(content.encode('utf-8'))
+            return hash_sha256.hexdigest()
+        except Exception as e:
+            logger.error(f"计算内容哈希失败: {e}")
+            return ""
+
+    def _save_file_hashes(self):
+        """保存文件哈希记录到磁盘"""
+        try:
+            with open(self.file_hashes_file, "wb") as f:
+                pickle.dump(self.file_hashes, f)
+            logger.info(f"文件哈希记录已保存到 {self.file_hashes_file}，共 {len(self.file_hashes)} 个文件")
+        except Exception as e:
+            logger.error(f"保存文件哈希记录失败: {e}")
+
+    def _load_file_hashes(self):
+        """从磁盘加载文件哈希记录"""
+        try:
+            if os.path.exists(self.file_hashes_file):
+                with open(self.file_hashes_file, "rb") as f:
+                    self.file_hashes = pickle.load(f)
+                logger.info(f"已加载 {len(self.file_hashes)} 个文件哈希记录")
+            else:
+                logger.info("文件哈希记录不存在，将创建新记录")
+        except Exception as e:
+            logger.error(f"加载文件哈希记录失败: {e}")
+            self.file_hashes = {}
+
+    def _save_faiss_index(self):
+        """保存 FAISS 索引到磁盘"""
+        try:
+            if self.vector_store is not None:
+                self.vector_store.save_local(self.faiss_index_file)
+                logger.info(f"FAISS 索引已保存到 {self.faiss_index_file}")
+        except Exception as e:
+            logger.error(f"保存 FAISS 索引失败: {e}")
+
+    def _load_faiss_index(self):
+        """从磁盘加载 FAISS 索引"""
+        try:
+            if os.path.exists(self.faiss_index_file):
+                self.vector_store = FAISS.load_local(
+                    self.faiss_index_file, 
+                    self.embeddings,
+                    allow_dangerous_deserialization=True
+                )
+                self.is_knowledge_base_loaded = True
+                logger.info(f"已从 {self.faiss_index_file} 加载 FAISS 索引")
+            else:
+                logger.info("FAISS 索引不存在，将创建新索引")
+        except Exception as e:
+            logger.warning(f"加载 FAISS 索引失败（可能不存在）: {e}")
             self.vector_store = None
-            self.document_sources = []  # 存储每个文本块的来源文件名
-            self.is_knowledge_base_loaded = False  # 知识库是否加载成功的标志
-            RAGManager._initialized = True
-            logger.info("RAGManager 初始化完成，使用 FAISS 和 Langchain embeddings")
+            self.is_knowledge_base_loaded = False
+
+    def _is_content_cached(self, original_filename: str, content: str) -> bool:
+        """检查文件内容是否已缓存（基于文件名和内容哈希）"""
+        try:
+            content_hash = self._get_content_hash(content)
+            
+            if original_filename in self.file_hashes:
+                stored_hash = self.file_hashes[original_filename]
+                if stored_hash == content_hash:
+                    logger.info(f"文件 {original_filename} 内容未变化，使用缓存")
+                    return True
+                else:
+                    logger.info(f"文件 {original_filename} 内容已变化，需要重新处理")
+            else:
+                logger.info(f"文件 {original_filename} 是新文件，需要处理")
+        except Exception as e:
+            logger.warning(f"检查缓存失败 {original_filename}: {e}")
+        return False
+
+    def _update_content_hash(self, original_filename: str, content: str):
+        """更新文件内容哈希记录"""
+        try:
+            content_hash = self._get_content_hash(content)
+            self.file_hashes[original_filename] = content_hash
+            self._save_file_hashes()
+            logger.info(f"已更新文件哈希记录: {original_filename}")
+        except Exception as e:
+            logger.error(f"更新文件哈希记录失败 {original_filename}: {e}")
 
     def extract_text_from_pdf(self, file_path):
         """从PDF文件中提取文本"""
@@ -152,97 +271,128 @@ class RAGManager:
 
     def process_uploaded_files(self, files):
         """处理上传的文件：提取、分块、并使用Langchain进行向量化"""
-        logger.info("为新上传重置 RAGManager 状态...")
-        self.vector_store = None
-        self.document_sources = []
-        self.is_knowledge_base_loaded = False
-
         if not files:
             return "未上传任何文件"
 
         status_texts = []
         logger.info("开始处理 %s 个上传的文件...", len(files))
+        
+        # 先提取所有文件的文本内容
+        extracted_files = []  # (original_filename, content)
+        for file_obj in files:
+            temp_file_path = getattr(file_obj, 'name', None) or file_obj
+            original_file_name = getattr(file_obj, 'orig_name', os.path.basename(str(temp_file_path)))
+            file_ext = os.path.splitext(original_file_name)[1].lower()
+            
+            text = ""
+            if file_ext == '.pdf':
+                text = self.extract_text_from_pdf(temp_file_path)
+            elif file_ext == '.txt':
+                text = self.extract_text_from_txt(temp_file_path)
+            else:
+                status_texts.append(f"❌ 不支持的文件类型: {original_file_name}")
+                continue
+            
+            if text and len(text.strip()) > 50:
+                extracted_files.append((original_file_name, text))
+            else:
+                status_texts.append(f"⚠️ 文件内容为空或过短，已跳过: {original_file_name}")
+        
+        # 检查哪些文件内容已缓存
+        files_to_process = []
+        cached_files = []
+        
+        for original_filename, content in extracted_files:
+            if self._is_content_cached(original_filename, content):
+                cached_files.append(original_filename)
+                status_texts.append(f"✅ 缓存命中，跳过重复向量化: {original_filename}")
+            else:
+                files_to_process.append((original_filename, content))
+                status_texts.append(f"✅ 成功提取文本: {original_filename}")
+        
+        # 如果有缓存的文件且没有新文件需要处理，直接使用已加载的索引
+        if not files_to_process and cached_files and self.is_knowledge_base_loaded:
+            status_texts.append(f"📊 使用已缓存的 FAISS 索引，无需重新向量化")
+            return "\n".join(status_texts)
+        
+        # 处理新文件
         raw_docs_content = []
         raw_docs_sources = []
-
+        for original_filename, content in files_to_process:
+            raw_docs_content.append(content)
+            raw_docs_sources.append(original_filename)
+        
         try:
-            # --- 提取文本 ---
-            for file_obj in files:
-                temp_file_path = getattr(file_obj, 'name', None) or file_obj
-                original_file_name = getattr(file_obj, 'orig_name', os.path.basename(str(temp_file_path)))
-                file_ext = os.path.splitext(original_file_name)[1].lower()
-                logger.info("处理文件: %s...", original_file_name)
-                text = ""
-                if file_ext == '.pdf':
-                    text = self.extract_text_from_pdf(temp_file_path)
-                elif file_ext == '.txt':
-                    text = self.extract_text_from_txt(temp_file_path)
-                else:
-                    status_texts.append(f"❌ 不支持的文件类型: {original_file_name}")
-                    continue
-
-                if text and len(text.strip()) > 50:
-                    raw_docs_content.append(text)
-                    raw_docs_sources.append(original_file_name)
-                    status_texts.append(f"✅ 成功提取文本: {original_file_name}")
-                else:
-                    status_texts.append(f"⚠️ 文件内容为空或过短，已跳过: {original_file_name}")
-
-            if not raw_docs_content:
-                status_texts.append("❌ 未能成功提取任何有效文本内容。")
-                return "\n".join(status_texts)
-
-            # --- 文档分块 - 使用Langchain的RecursiveCharacterTextSplitter ---
-            logger.info("使用 Langchain 分块文档...")
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=800,
-                chunk_overlap=150,
-                length_function=len,
-            )
-
-            langchain_docs = []
-            for doc_idx, doc_text in enumerate(raw_docs_content):
-                source = raw_docs_sources[doc_idx]
-                chunks = text_splitter.split_text(doc_text)
-                for chunk in chunks:
-                    if len(chunk.strip()) > 20:  # 确保块不是太小
-                        langchain_doc = LangchainDocument(
-                            page_content=chunk,
-                            metadata={"source": source}
-                        )
-                        langchain_docs.append(langchain_doc)
-                        self.document_sources.append(source)
-
-            if not langchain_docs:
-                status_texts.append("❌ 提取的文本内容无法分割成有效的文本块。")
-                return "\n".join(status_texts)
-
-            logger.info("将文档分割成 %s 个块。", len(langchain_docs))
-            status_texts.append(f"📄 已将文档分割为 {len(langchain_docs)} 个文本块")
-
-            # --- 创建向量存储 ---
-            logger.info("使用 FAISS 创建向量存储...")
-            try:
-                self.vector_store = FAISS.from_documents(
-                    langchain_docs,
-                    self.embeddings
+            # 如果有新文件需要处理
+            if raw_docs_content:
+                # --- 文档分块 - 使用Langchain的RecursiveCharacterTextSplitter ---
+                logger.info("使用 Langchain 分块文档...")
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=800,
+                    chunk_overlap=150,
+                    length_function=len,
                 )
-                logger.info("FAISS 向量存储创建完成，包含 %s 个嵌入", len(langchain_docs))
-                status_texts.append(f"📊 成功创建向量存储，包含 {len(langchain_docs)} 个文本块的向量")
-                self.is_knowledge_base_loaded = True
-            except Exception as e:
-                error_msg = f"创建向量存储时出错: {str(e)}"
-                status_texts.append(f"❌ {error_msg}")
-                logger.error(error_msg)
-                logger.debug(traceback.format_exc())
-                self.is_knowledge_base_loaded = False
+
+                langchain_docs = []
+                for doc_idx, doc_text in enumerate(raw_docs_content):
+                    source = raw_docs_sources[doc_idx]
+                    doc_text_str = str(doc_text) if doc_text is not None else ""
+                    chunks = text_splitter.split_text(doc_text_str)
+                    for chunk in chunks:
+                        if len(chunk.strip()) > 20:
+                            langchain_doc = LangchainDocument(
+                                page_content=str(chunk),
+                                metadata={"source": str(source)}
+                            )
+                            langchain_docs.append(langchain_doc)
+                            self.document_sources.append(source)
+
+                if langchain_docs:
+                    logger.info("将文档分割成 %s 个块。", len(langchain_docs))
+                    status_texts.append(f"📄 已将新文档分割为 {len(langchain_docs)} 个文本块")
+
+                    # --- 创建或更新向量存储 ---
+                    logger.info("使用 FAISS 更新向量存储...")
+                    try:
+                        if self.vector_store is None:
+                            # 创建新的向量存储
+                            self.vector_store = FAISS.from_documents(
+                                langchain_docs,
+                                self.embeddings
+                            )
+                        else:
+                            # 追加到现有向量存储
+                            self.vector_store.add_documents(langchain_docs)
+                        
+                        logger.info("FAISS 向量存储更新完成")
+                        status_texts.append(f"📊 成功更新向量存储")
+                        self.is_knowledge_base_loaded = True
+                        
+                        # 保存到磁盘
+                        self._save_faiss_index()
+                        
+                        # 更新文件哈希记录
+                        for original_filename, content in files_to_process:
+                            self._update_content_hash(original_filename, content)
+                        
+                    except Exception as e:
+                        error_msg = f"创建向量存储时出错: {str(e)}"
+                        status_texts.append(f"❌ {error_msg}")
+                        logger.error(error_msg)
+                        logger.debug(traceback.format_exc())
+                        self.is_knowledge_base_loaded = False
+            elif cached_files:
+                # 只有缓存的文件，确保向量存储已加载
+                if self.is_knowledge_base_loaded:
+                    status_texts.append(f"📊 所有文件均使用缓存，无需重新向量化")
+                else:
+                    status_texts.append(f"⚠️ 缓存文件存在但向量存储未加载，请重新上传")
 
         except Exception as e:
             error_msg = f"处理文件时发生严重错误: {str(e)}"
             status_texts.append(f"❌ {error_msg}")
             logger.error(error_msg)
             logger.debug(traceback.format_exc())
-            self.is_knowledge_base_loaded = False
 
         status_result = "\n".join(status_texts)
         logger.info("文件处理完成。知识库加载状态: %s", self.is_knowledge_base_loaded)
@@ -301,71 +451,8 @@ class RAGManager:
             return []
 
     def format_search_results_as_html(self, results: List[Dict[str, Any]]) -> str:
-        """将搜索结果格式化为HTML"""
-        if not results:
-            if not self.is_knowledge_base_loaded:
-                return "<p>⚠️ 知识库尚未加载或加载失败。请先上传有效的知识库文档。</p>"
-            else:
-                return "<p>✅ 知识库已加载，但在文档中未找到与查询语义相关的段落 (阈值 > 0.3)。</p>"
-
-        html_result = "<div class='search-results'>"
-        html_result += f"<h4>在知识库文档中找到 {len(results)} 个相关段落：</h4>"
-        for i, res in enumerate(results):
-            source_escaped = html.escape(res.get('source', '未知来源'))
-            text_escaped = html.escape(res.get('text', ''))
-            similarity = res.get('similarity', 0.0)
-            html_result += f"""
-            <div class='result-item'>
-                <h5>相关段落 {i + 1} (来自: {source_escaped}, 相似度: {similarity:.3f})</h5>
-                <div class='result-text'>{text_escaped}</div>
-            </div>"""
-        html_result += "</div>"
-        css = """
-        <style>
-        .search-results {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 10px 0;
-        }
-        .search-results h4 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 1.1em;
-            font-weight: 600;
-        }
-        .result-item {
-            background-color: #ffffff;
-            border: 1px solid #eef2f6;
-            border-left: 4px solid #2a81e3;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        .result-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(42, 129, 227, 0.12);
-        }
-        .result-item h5 {
-            margin: 0 0 10px 0;
-            color: #2c3e50;
-            font-size: 14px;
-            font-weight: bold;
-        }
-        .result-text {
-            color: #555555;
-            font-size: 13.5px;
-            line-height: 1.6;
-            background-color: #fafbfc;
-            padding: 12px;
-            border-radius: 6px;
-            border: 1px solid #f1f3f5;
-            white-space: pre-wrap;
-        }
-        </style>
-        """
-        html_result = f"{css}{html_result}"
-        return html_result
+        """将搜索结果格式化为HTML（使用统一的格式化工具）"""
+        return format_doc_results_html(results, self.is_knowledge_base_loaded)
 
 
 class EntityExtractor:
@@ -616,8 +703,8 @@ class Neo4jHandler:
                     continue
             else:
                 # --- 处理其他未知类型 ---
-                print(
-                    f"警告: 返回的路径值既不是 Path 对象，也不是预期的列表结构。类型: {type(path_obj)}，值: {path_obj}。跳过此路径。")
+                logger.warning(
+                    f"返回的路径值既不是 Path 对象，也不是预期的列表结构。类型: {type(path_obj)}，值: {path_obj}。跳过此路径。")
                 continue
 
         logger.debug(f"在 '{source_name}' 和 '{target_name}' 之间成功处理了 {processed_paths_count} 条路径。")
@@ -700,17 +787,24 @@ class EntityMatcher:
             return
 
         logger.info(f"为 {len(texts_to_embed)} 个新的 KG 实体生成嵌入...")
+        logger.debug(f"示例实体名称: {texts_to_embed[:3] if len(texts_to_embed) > 0 else '无'}")
+        logger.debug(f"示例实体名称类型: {[type(text) for text in texts_to_embed[:3]]}")
+
+        # 确保所有文本都是字符串类型
+        texts_to_embed = [str(text) if text is not None else "" for text in texts_to_embed]
 
         # 使用批处理来提高效率
         batch_size = 10
         for i in range(0, len(texts_to_embed), batch_size):
             batch = texts_to_embed[i:min(i + batch_size, len(texts_to_embed))]
             try:
+                logger.debug(f"处理批次: {batch}")
                 embeddings = self.embeddings.embed_documents(batch)
                 for j, text in enumerate(batch):
                     self.embeddings_cache[text] = embeddings[j]
             except Exception as e:
                 logger.error(f"生成批次嵌入时出错: {e}")
+                logger.debug(f"错误批次内容: {batch}")
 
         logger.debug(f"生成了 {len(texts_to_embed)} 个新嵌入。")
         self._save_embeddings_cache()
@@ -781,11 +875,12 @@ class ResponseGenerator:
 
     def __init__(self, llm: ChatOpenAI):
         self.llm = llm
+        self.logger = logging.getLogger(__name__)
 
     def generate_response(self, question: str, kg_context: Dict[str, Any],
                           entities: List[Dict[str, str]], doc_results: List[Dict[str, Any]]) -> str:
         """使用LLM生成响应"""
-        print("--- 响应生成 ---")
+        self.logger.info("--- 响应生成 ---")
         kg_context_str = self._format_kg_context(kg_context)
         doc_context_str = self._format_doc_context(doc_results)
         entities_str = json.dumps(entities, ensure_ascii=False, indent=2)
@@ -916,8 +1011,7 @@ class SoftwareEngineeringQASystem:
         self.openai_api_key = os.getenv("DASHSCOPE_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.openai_base_url = os.getenv("OPENAI_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
         if not self.openai_api_key:
-            logger.error("未找到 API 密钥。")
-            raise ValueError("未找到 API 密钥。")
+            logger.warning("未找到 API 密钥，部分功能可能无法正常工作。")
 
         # 设置 Langchain 组件
         self.llm = self._setup_llm()
@@ -931,21 +1025,40 @@ class SoftwareEngineeringQASystem:
             logger.debug(traceback.format_exc())
             raise
 
-        # 初始化 RAG 管理器
-        self.rag_manager = RAGManager.get_instance(embeddings=self.embeddings)
+        # 初始化 RAG 管理器（如果有 embeddings）
+        if self.embeddings:
+            logger.info("初始化 RAGManager...")
+            self.rag_manager = RAGManager.get_instance(embeddings=self.embeddings)
+            logger.info("RAGManager 初始化完成。")
+        else:
+            self.rag_manager = None
+            logger.warning("未设置 embeddings，RAG 功能将不可用。")
 
-        # 实体匹配器
-        self.entity_matcher = EntityMatcher(self.embeddings, self.neo4j_handler)
-        try:
-            self.entity_matcher.load_and_cache_kg_entities()
-        except Exception as e:
-            logger.warning("初始 KG 实体加载期间出错: %s", e)
-            logger.debug(traceback.format_exc())
+        # 实体匹配器（如果有 embeddings）
+        if self.embeddings:
+            logger.info("初始化 EntityMatcher...")
+            self.entity_matcher = EntityMatcher(self.embeddings, self.neo4j_handler)
+            logger.info("EntityMatcher 初始化完成，开始加载 KG 实体...")
+            try:
+                self.entity_matcher.load_and_cache_kg_entities()
+                logger.info("KG 实体加载完成。")
+            except Exception as e:
+                logger.warning("初始 KG 实体加载期间出错: %s", e)
+                logger.debug(traceback.format_exc())
+        else:
+            self.entity_matcher = None
+            logger.warning("未设置 embeddings，实体匹配功能将不可用。")
 
-        # 其他组件
-        self.entity_extractor = EntityExtractor(self.llm)
-        self.response_generator = ResponseGenerator(self.llm)  # 保留原始生成器用于回退
-        self.agent_coordinator = AgentCoordinator(self.llm)
+        # 其他组件（如果有 LLM）
+        if self.llm:
+            self.entity_extractor = EntityExtractor(self.llm)
+            self.response_generator = ResponseGenerator(self.llm)  # 保留原始生成器用于回退
+            self.agent_coordinator = AgentCoordinator(self.llm)
+        else:
+            self.entity_extractor = None
+            self.response_generator = None
+            self.agent_coordinator = None
+            logger.warning("未设置 LLM，问答功能将不可用。")
 
         # UI 状态
         self.current_kg_context = {"entities": [], "paths": []}
@@ -957,37 +1070,98 @@ class SoftwareEngineeringQASystem:
 
         logger.info("SoftwareEngineeringQASystem 初始化成功。")
 
-    def _setup_llm(self) -> ChatOpenAI:
+    def _setup_llm(self) -> Optional[Any]:
         """设置Langchain的LLM组件"""
+        if not self.openai_api_key:
+            logger.warning("未设置 API 密钥，跳过 LLM 初始化。")
+            return None
+            
         try:
-            llm = ChatOpenAI(
-                api_key=self.openai_api_key,
-                base_url=self.openai_base_url,
-                temperature=0.5,
-                model="qwen-plus"
-            )
-            logger.info("Langchain LLM 设置成功。")
+            try:
+                # 尝试使用通义千问的 langchain 集成
+                llm = ChatTongyi(
+                    api_key=self.openai_api_key,
+                    temperature=0.5,
+                    model="qwen-plus"
+                )
+                logger.info("Langchain ChatTongyi 设置成功。")
+            except Exception:
+                # 回退到使用 OpenAI 兼容接口
+                llm = ChatOpenAI(
+                    api_key=self.openai_api_key,
+                    base_url=self.openai_base_url,
+                    temperature=0.5,
+                    model="qwen-plus"
+                )
+                logger.info("Langchain ChatOpenAI (兼容模式) 设置成功。")
             return llm
         except Exception as e:
             logger.error("设置 LLM 失败: %s", e)
             logger.debug(traceback.format_exc())
-            raise
+            return None
 
-    def _setup_embeddings(self) -> OpenAIEmbeddings:
+    def _setup_embeddings(self) -> Optional[Embeddings]:
         """设置Langchain的Embeddings组件"""
+        if not self.openai_api_key:
+            logger.warning("未设置 API 密钥，跳过 Embeddings 初始化。")
+            return None
+            
         try:
-            embeddings = OpenAIEmbeddings(
-                api_key=self.openai_api_key,
-                base_url=self.openai_base_url,
-                model=RAG_EMBEDDING_MODEL,
-                dimensions=RAG_EMBEDDING_DIMENSION
-            )
-            logger.info("Langchain Embeddings 设置成功。")
+            try:
+                # 尝试使用通义千问的 langchain 集成
+                embeddings = DashScopeEmbeddings(
+                    api_key=self.openai_api_key,
+                    model=RAG_EMBEDDING_MODEL
+                )
+                logger.info("Langchain DashScopeEmbeddings 设置成功。")
+            except Exception:
+                # 回退到使用 OpenAI 兼容接口，但需要注意：通义千问的 text-embedding-v3 需要特殊处理
+                logger.warning("DashScopeEmbeddings 导入失败，尝试直接使用 dashscope SDK...")
+                # 创建一个自定义的 Embeddings 类，直接使用 dashscope SDK
+                from langchain.embeddings.base import Embeddings as BaseEmbeddings
+                
+                class CustomDashScopeEmbeddings(BaseEmbeddings):
+                    def __init__(self, api_key: str, model: str):
+                        self.api_key = api_key
+                        self.model = model
+                        import dashscope
+                        dashscope.api_key = api_key
+                    
+                    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+                        import dashscope
+                        results = []
+                        for text in texts:
+                            try:
+                                resp = dashscope.TextEmbedding.call(
+                                    model=self.model,
+                                    input=text
+                                )
+                                if resp.status_code == 200:
+                                    results.append(resp.output['embeddings'][0]['embedding'])
+                                elif resp.status_code == 403 and hasattr(resp, 'code') and resp.code == 'AllocationQuota.FreeTierOnly':
+                                    raise Exception("通义千问 API 错误：免费额度已用完。"
+                                                    "请在管理控制台关闭'仅使用免费额度'模式，或使用其他 API 密钥。")
+                                else:
+                                    raise Exception(f"获取嵌入失败 (状态码 {resp.status_code}): {resp}")
+                            except Exception as e:
+                                if "FreeTierOnly" in str(e):
+                                    raise e
+                                raise Exception(f"调用通义千问嵌入 API 时出错: {str(e)}")
+                        return results
+                    
+                    def embed_query(self, text: str) -> List[float]:
+                        return self.embed_documents([text])[0]
+                
+                embeddings = CustomDashScopeEmbeddings(
+                    api_key=self.openai_api_key,
+                    model=RAG_EMBEDDING_MODEL
+                )
+                logger.info("Custom DashScopeEmbeddings 设置成功。")
             return embeddings
         except Exception as e:
             logger.error("设置 Embeddings 失败: %s", e)
             logger.debug(traceback.format_exc())
-            raise
+            return None
 
     def answer_question(self, question: str) -> dict:
         """处理问题，整合 KG 和 RAG 生成答案，支持多轮对话"""
@@ -1175,10 +1349,19 @@ def get_qa_system_instance() -> SoftwareEngineeringQASystem:
 def process_uploaded_files(files):
     """UI调用的文档处理函数"""
     logger.debug("UI 触发文件处理...")
-    # 确保 QA 系统已初始化
-    qa_system = get_qa_system_instance()
-    rag_manager = qa_system.rag_manager
-    return rag_manager.process_uploaded_files(files)
+    try:
+        # 确保 QA 系统已初始化
+        qa_system = get_qa_system_instance()
+        rag_manager = qa_system.rag_manager
+        if rag_manager is None:
+            return "❌ 错误：RAG 管理器未初始化。请检查 API 密钥配置是否正确。"
+        return rag_manager.process_uploaded_files(files)
+    except RuntimeError as e:
+        return f"❌ 系统错误：{str(e)}"
+    except Exception as e:
+        logger.error(f"处理文件上传时出错: {e}")
+        logger.debug(traceback.format_exc())
+        return f"❌ 文件上传处理错误: {str(e)}"
 
 
 def search_documents(query, top_k=3):

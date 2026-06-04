@@ -1,5 +1,6 @@
 import torch
 import json
+import logging
 import re
 import time
 import os
@@ -10,6 +11,14 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from typing import List, Dict, Any, Tuple
 from modelscope import AutoModelForCausalLM, AutoTokenizer
+
+# 导入统一配置模块
+from config import get_neo4j_config, get_log_config
+from utils import setup_logger
+
+# 配置日志
+log_config = get_log_config()
+logger = setup_logger(__name__, log_file=log_config.log_file, log_level=log_config.log_level)
 
 # 定义函数编程的实体类型
 ENTITY_TYPES = [
@@ -73,7 +82,7 @@ class QwenFunctionalProgrammingKGBuilder:
         
     def initialize_model(self):
         """加载和初始化Qwen模型"""
-        print(f"正在初始化模型: {self.model_name}")
+        logger.info(f"正在初始化模型: {self.model_name}")
         
         # 清理内存
         gc.collect()
@@ -88,7 +97,7 @@ class QwenFunctionalProgrammingKGBuilder:
         )
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         
-        print("模型初始化成功")
+        logger.info("模型初始化成功")
         
     def extract_triples(self, text: str) -> List[Dict[str, Any]]:
         """从文本中提取函数编程知识三元组"""
@@ -151,7 +160,7 @@ class QwenFunctionalProgrammingKGBuilder:
             
             # 显示当前内存使用情况
             if torch.cuda.is_available():
-                print(f"模型输入前GPU内存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+                logger.debug(f"模型输入前GPU内存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
             
             # 生成响应
             generated_ids = self.model.generate(
@@ -162,7 +171,7 @@ class QwenFunctionalProgrammingKGBuilder:
             
             # 显示当前内存使用情况
             if torch.cuda.is_available():
-                print(f"模型生成后GPU内存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+                logger.debug(f"模型生成后GPU内存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
             
             # 提取生成的部分
             generated_ids = [
@@ -184,18 +193,18 @@ class QwenFunctionalProgrammingKGBuilder:
                 if json_match:
                     try:
                         triples = json.loads(json_match.group(0))
-                        print(f"成功解析JSON，找到{len(triples)}个三元组")
+                        logger.info(f"成功解析JSON，找到{len(triples)}个三元组")
                     except json.JSONDecodeError as e:
-                        print(f"找到类JSON结构但无法解析: {e}")
-                        print(f"提取的JSON: {json_match.group(0)[:200]}...")
+                        logger.error(f"找到类JSON结构但无法解析: {e}")
+                        logger.error(f"提取的JSON: {json_match.group(0)[:200]}...")
                 else:
                     # 尝试解析整个清理后的响应
                     try:
                         triples = json.loads(cleaned_response)
-                        print(f"成功解析整个响应，找到{len(triples)}个三元组")
+                        logger.info(f"成功解析整个响应，找到{len(triples)}个三元组")
                     except json.JSONDecodeError:
-                        print(f"无法将响应解析为JSON")
-                        print(f"清理后的响应: {cleaned_response[:200]}...")
+                        logger.error(f"无法将响应解析为JSON")
+                        logger.error(f"清理后的响应: {cleaned_response[:200]}...")
             
             # 验证三元组结构
             valid_triples = []
@@ -206,11 +215,11 @@ class QwenFunctionalProgrammingKGBuilder:
                 else:
                     invalid_count += 1
                     if invalid_count <= 3:  # 只显示前3个无效三元组
-                        print(f"警告: 索引 {i} 处的三元组结构无效: {trip}")
+                        logger.warning(f"警告: 索引 {i} 处的三元组结构无效: {trip}")
                     elif invalid_count == 4:
-                        print("更多无效三元组被跳过...")
+                        logger.warning("更多无效三元组被跳过...")
             
-            print(f"提取总结: 找到 {len(triples)} 个三元组，其中 {len(valid_triples)} 个结构有效")
+            logger.info(f"提取总结: 找到 {len(triples)} 个三元组，其中 {len(valid_triples)} 个结构有效")
             
             # 释放内存
             del model_inputs, generated_ids, response_content
@@ -221,7 +230,7 @@ class QwenFunctionalProgrammingKGBuilder:
             return valid_triples
                 
         except Exception as e:
-            print(f"三元组提取过程中出错: {e}")
+            logger.error(f"三元组提取过程中出错: {e}")
             # 释放内存
             gc.collect()
             if torch.cuda.is_available():
@@ -231,9 +240,9 @@ class QwenFunctionalProgrammingKGBuilder:
     def process_text(self, text: str) -> List[Dict[str, Any]]:
         """处理文本以提取三元组"""
         # 提取三元组
-        print("正在提取三元组...")
+        logger.info("正在提取三元组...")
         triples = self.extract_triples(text)
-        print(f"找到{len(triples)}个三元组")
+        logger.info(f"找到{len(triples)}个三元组")
         
         return triples
     
@@ -300,7 +309,7 @@ class QwenFunctionalProgrammingKGBuilder:
             self.initialize_model()
         
         # 读取文本文件 - 改成分块读取处理
-        print(f"正在读取文本文件: {file_path}")
+        logger.info(f"正在读取文本文件: {file_path}")
         all_triples = []
         
         try:
@@ -311,7 +320,7 @@ class QwenFunctionalProgrammingKGBuilder:
                 file_size = f.tell()  # 获取文件大小
                 f.seek(0)  # 回到文件开头
                 
-                print(f"文件大小: {file_size} 字节")
+                logger.info(f"文件大小: {file_size} 字节")
                 
                 # 分块读取文件
                 text_buffer = ""
@@ -365,24 +374,24 @@ class QwenFunctionalProgrammingKGBuilder:
                     chunks.append(text_buffer)
                     chunk_count += 1
                 
-                print(f"文本已分割为 {len(chunks)} 个块")
+                logger.info(f"文本已分割为 {len(chunks)} 个块")
         except Exception as e:
-            print(f"读取或分块文件时出错: {e}")
+            logger.error(f"读取或分块文件时出错: {e}")
             return {"error": str(e)}
         
         # 显示内存使用情况
-        print("初始内存状态:")
+        logger.info("初始内存状态:")
         if torch.cuda.is_available():
-            print(f"GPU内存分配: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
-            print(f"GPU内存缓存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+            logger.debug(f"GPU内存分配: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+            logger.debug(f"GPU内存缓存: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
         
         # 限制处理的块数
         chunks_to_process = min(len(chunks), max_chunks)
-        print(f"将处理前 {chunks_to_process} 个块")
+        logger.info(f"将处理前 {chunks_to_process} 个块")
         
         # 处理每个块并收集三元组
         for i, chunk in enumerate(tqdm(chunks[:chunks_to_process], desc="处理文本块")):
-            print(f"\n处理块 {i+1}/{chunks_to_process}, 大小: {len(chunk)} 字符")
+            logger.info(f"\n处理块 {i+1}/{chunks_to_process}, 大小: {len(chunk)} 字符")
             
             try:
                 # 处理当前块
@@ -400,11 +409,11 @@ class QwenFunctionalProgrammingKGBuilder:
                         
                     with open(output_json_path + f".part{i+1}", "w", encoding="utf-8") as out_f:
                         json.dump(all_triples, out_f, indent=2, ensure_ascii=False)
-                    print(f"已保存中间结果到{output_json_path}.part{i+1}")
+                    logger.info(f"已保存中间结果到{output_json_path}.part{i+1}")
                 
                 # 显示内存使用情况
                 if torch.cuda.is_available():
-                    print(f"处理块 {i+1} 后GPU内存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+                    logger.debug(f"处理块 {i+1} 后GPU内存: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
                 
                 # 释放内存
                 gc.collect()
@@ -412,13 +421,13 @@ class QwenFunctionalProgrammingKGBuilder:
                     torch.cuda.empty_cache()
                     
             except Exception as e:
-                print(f"处理块 {i+1} 时出错: {e}")
+                logger.error(f"处理块 {i+1} 时出错: {e}")
                 # 记录错误但继续处理下一个块
                 continue
             
             # 避免模型过载
             if i < chunks_to_process - 1:
-                print("休息3秒...")
+                logger.info("休息3秒...")
                 time.sleep(3)
         
         # 保存最终结果
@@ -429,8 +438,8 @@ class QwenFunctionalProgrammingKGBuilder:
         with open(output_json_path, "w", encoding="utf-8") as f:
             json.dump(all_triples, f, indent=2, ensure_ascii=False)
         
-        print(f"提取完成。处理了{chunks_to_process}个文本块，找到{len(all_triples)}个三元组")
-        print(f"结果已保存到{output_json_path}")
+        logger.info(f"提取完成。处理了{chunks_to_process}个文本块，找到{len(all_triples)}个三元组")
+        logger.info(f"结果已保存到{output_json_path}")
         
         return {
             "triples": all_triples,
@@ -457,9 +466,9 @@ class QwenFunctionalProgrammingKGBuilder:
             if not self.validate_triple_structure(triple):
                 invalid_count += 1
                 if invalid_count <= 5:  # 只显示前5个无效三元组，避免日志过多
-                    print(f"警告: 跳过索引 {i} 处的无效三元组: {triple}")
+                    logger.warning(f"警告: 跳过索引 {i} 处的无效三元组: {triple}")
                 elif invalid_count == 6:
-                    print("更多无效三元组被跳过...")
+                    logger.warning("更多无效三元组被跳过...")
                 continue
             
             # 创建三元组的唯一键
@@ -499,7 +508,7 @@ class QwenFunctionalProgrammingKGBuilder:
         # 转换回列表
         unique_triples = list(unique_dict.values())
         
-        print(f"去重过程：处理了 {len(triples)} 个三元组，跳过了 {invalid_count} 个无效三元组，剩余 {len(unique_triples)} 个唯一三元组")
+        logger.info(f"去重过程：处理了 {len(triples)} 个三元组，跳过了 {invalid_count} 个无效三元组，剩余 {len(unique_triples)} 个唯一三元组")
         
         return unique_triples
     
@@ -507,7 +516,7 @@ class QwenFunctionalProgrammingKGBuilder:
         """创建知识图谱的可视化"""
         # 如果有太多三元组，抽样一个子集进行可视化
         if len(triples) > max_nodes * 2:
-            print(f"三元组太多，无法可视化。抽样{max_nodes*2}个三元组...")
+            logger.info(f"三元组太多，无法可视化。抽样{max_nodes*2}个三元组...")
             import random
             random.seed(42)  # 为了可重现性
             triples_sample = random.sample(triples, max_nodes*2)
@@ -553,7 +562,7 @@ class QwenFunctionalProgrammingKGBuilder:
         
         # 检查是否有节点可视化
         if len(G.nodes()) == 0:
-            print("没有节点可视化。")
+            logger.warning("没有节点可视化。")
             return
             
         # 创建可视化
@@ -596,7 +605,7 @@ class QwenFunctionalProgrammingKGBuilder:
         # 保存或显示可视化
         if output_file:
             plt.savefig(output_file, dpi=300, bbox_inches="tight")
-            print(f"可视化已保存到{output_file}")
+            logger.info(f"可视化已保存到{output_file}")
         else:
             plt.show()
         
@@ -621,25 +630,25 @@ class Neo4jHandler:
             with self.driver.session() as session:
                 result = session.run("RETURN 1")
                 result.single()
-            print("成功连接到Neo4j数据库")
+            logger.info("成功连接到Neo4j数据库")
         except Exception as e:
-            print(f"连接Neo4j失败: {e}")
+            logger.error(f"连接Neo4j失败: {e}")
             raise
         
     def close(self):
         """关闭Neo4j连接"""
         if self.driver:
             self.driver.close()
-            print("Neo4j连接已关闭")
+            logger.info("Neo4j连接已关闭")
             
     def clear_database(self):
         """从数据库中删除所有节点和关系"""
         try:
             with self.driver.session() as session:
                 session.run("MATCH (n) DETACH DELETE n")
-                print("数据库已清空")
+                logger.info("数据库已清空")
         except Exception as e:
-            print(f"清空数据库时出错: {e}")
+            logger.error(f"清空数据库时出错: {e}")
             
     def create_constraints(self):
         """为实体类型创建约束"""
@@ -659,12 +668,12 @@ class Neo4jHandler:
                                 # Neo4j 3.x
                                 session.run(f"CREATE CONSTRAINT ON (n:`{clean_type}`) ASSERT n.name IS UNIQUE")
                             except:
-                                print(f"无法为{clean_type}创建约束，跳过")
+                                logger.warning(f"无法为{clean_type}创建约束，跳过")
                     except Exception as e:
-                        print(f"为{clean_type}创建约束时出错: {e}")
-                print("已为所有实体类型创建约束")
+                        logger.error(f"为{clean_type}创建约束时出错: {e}")
+                logger.info("已为所有实体类型创建约束")
         except Exception as e:
-            print(f"设置约束时出错: {e}")
+            logger.error(f"设置约束时出错: {e}")
             
     def add_triple(self, triple):
         """向数据库添加三元组"""
@@ -723,8 +732,8 @@ class Neo4jHandler:
                 
                 return result.single() is not None
         except Exception as e:
-            print(f"添加三元组时出错: {e}")
-            print(f"有问题的三元组: {triple}")
+            logger.error(f"添加三元组时出错: {e}")
+            logger.error(f"有问题的三元组: {triple}")
             return False
             
     def add_triples_batch(self, triples, batch_size=100):
@@ -763,11 +772,11 @@ class Neo4jHandler:
             else:
                 invalid_count += 1
                 if invalid_count <= 3:
-                    print(f"警告: 跳过无效三元组 {i}: {triple}")
+                    logger.warning(f"警告: 跳过无效三元组 {i}: {triple}")
                 elif invalid_count == 4:
-                    print("更多无效三元组被跳过...")
+                    logger.warning("更多无效三元组被跳过...")
         
-        print(f"验证总结: 总共 {len(triples)} 个三元组，其中 {len(valid_triples)} 个有效， {invalid_count} 个无效")
+        logger.info(f"验证总结: 总共 {len(triples)} 个三元组，其中 {len(valid_triples)} 个有效， {invalid_count} 个无效")
         
         # 使用有效的三元组进行批处理
         for i in range(0, len(valid_triples), batch_size):
@@ -830,10 +839,10 @@ class Neo4jHandler:
                         tx.commit()
                         successful += len(batch)
                 
-                print(f"已添加 {i+len(batch)}/{len(valid_triples)} 个三元组")
+                logger.info(f"已添加 {i+len(batch)}/{len(valid_triples)} 个三元组")
                 
             except Exception as e:
-                print(f"添加三元组批次 {i//batch_size + 1} 时出错: {e}")
+                logger.error(f"添加三元组批次 {i//batch_size + 1} 时出错: {e}")
         
         return successful
             
@@ -865,7 +874,7 @@ class Neo4jHandler:
                 
                 return stats
         except Exception as e:
-            print(f"获取统计信息时出错: {e}")
+            logger.error(f"获取统计信息时出错: {e}")
             return {"error": str(e)}
 
 
@@ -890,9 +899,9 @@ def load_triples_to_neo4j(triples_json_path: str, neo4j_uri: str, neo4j_username
         with open(triples_json_path, 'r', encoding='utf-8') as f:
             triples = json.load(f)
             
-        print(f"已从{triples_json_path}加载{len(triples)}个三元组")
+        logger.info(f"已从{triples_json_path}加载{len(triples)}个三元组")
     except Exception as e:
-        print(f"从{triples_json_path}加载三元组时出错: {e}")
+        logger.error(f"从{triples_json_path}加载三元组时出错: {e}")
         return {"error": str(e)}
     
     # 初始化Neo4j处理器
@@ -907,7 +916,7 @@ def load_triples_to_neo4j(triples_json_path: str, neo4j_uri: str, neo4j_username
     neo4j_handler.create_constraints()
     
     # 将三元组添加到数据库
-    print("正在将三元组批量添加到Neo4j...")
+    logger.info("正在将三元组批量添加到Neo4j...")
     successful_triples = neo4j_handler.add_triples_batch(triples, batch_size=batch_size)
     
     # 获取统计信息
@@ -918,8 +927,8 @@ def load_triples_to_neo4j(triples_json_path: str, neo4j_uri: str, neo4j_username
     # 关闭Neo4j连接
     neo4j_handler.close()
     
-    print(f"\n成功添加{successful_triples}个三元组（共{len(triples)}个）到Neo4j")
-    print(f"Neo4j现在包含{stats['node_count']}个节点和{stats['relationship_count']}个关系")
+    logger.info(f"\n成功添加{successful_triples}个三元组（共{len(triples)}个）到Neo4j")
+    logger.info(f"Neo4j现在包含{stats['node_count']}个节点和{stats['relationship_count']}个关系")
     
     return stats
 
@@ -938,9 +947,9 @@ def visualize_triples(triples_json_path: str, output_file: str = None, max_nodes
         with open(triples_json_path, 'r', encoding='utf-8') as f:
             triples = json.load(f)
             
-        print(f"已从{triples_json_path}加载{len(triples)}个三元组")
+        logger.info(f"已从{triples_json_path}加载{len(triples)}个三元组")
     except Exception as e:
-        print(f"从{triples_json_path}加载三元组时出错: {e}")
+        logger.error(f"从{triples_json_path}加载三元组时出错: {e}")
         return
     
     # 创建知识图谱构建器实例，仅用于可视化
@@ -954,10 +963,11 @@ def visualize_triples(triples_json_path: str, output_file: str = None, max_nodes
 def main():
     """展示知识图谱构建过程的主函数"""
     
-    # Neo4j数据库配置
-    NEO4J_URI = "bolt://localhost:7687"
-    NEO4J_USERNAME = "neo4j"
-    NEO4J_PASSWORD = "password"  # 替换为您的实际密码
+    # Neo4j数据库配置 - 优先从配置模块获取
+    neo4j_config = get_neo4j_config()
+    NEO4J_URI = neo4j_config.uri
+    NEO4J_USERNAME = neo4j_config.username
+    NEO4J_PASSWORD = neo4j_config.password
     
     # 创建输出目录
     output_dir = "functional_programming_kg_results"
@@ -969,6 +979,7 @@ def main():
     
     try:
         # 步骤1：处理文本文件，提取三元组
+        logger.info("\n=== 步骤1：从文本中提取三元组 ===")
         print("\n=== 步骤1：从文本中提取三元组 ===")
         kg_builder = QwenFunctionalProgrammingKGBuilder()
         
@@ -989,16 +1000,20 @@ def main():
             with open(unique_output_path, "w", encoding="utf-8") as f:
                 json.dump(unique_triples, f, indent=2, ensure_ascii=False)
             
+            logger.info(f"总共提取了 {len(result['triples'])} 个三元组，去重后有 {len(unique_triples)} 个")
+            logger.info(f"去重结果已保存到 {unique_output_path}")
             print(f"总共提取了 {len(result['triples'])} 个三元组，去重后有 {len(unique_triples)} 个")
             print(f"去重结果已保存到 {unique_output_path}")
         
         # 步骤2：将三元组加载到Neo4j（可选）
+        logger.info("\n=== 步骤2：将三元组加载到Neo4j（可选） ===")
         print("\n=== 步骤2：将三元组加载到Neo4j（可选） ===")
         
         import sys
         if sys.stdin.isatty():
             response = input("是否要将三元组加载到Neo4j？(y/n): ").strip().lower()
         else:
+            logger.info("检测到非交互式终端，默认选择将三元组加载到Neo4j。")
             print("检测到非交互式终端，默认选择将三元组加载到Neo4j。")
             response = 'y'
             
@@ -1014,26 +1029,37 @@ def main():
             )
             
             # 报告统计信息
+            logger.info("\n=== Neo4j知识图谱统计信息 ===")
+            logger.info(f"总节点数: {stats['node_count']}")
+            logger.info(f"总关系数: {stats['relationship_count']}")
+            
             print("\n=== Neo4j知识图谱统计信息 ===")
             print(f"总节点数: {stats['node_count']}")
             print(f"总关系数: {stats['relationship_count']}")
             
+            logger.info("\n节点类型:")
             print("\n节点类型:")
             for node_type, count in stats['node_types']:
+                logger.info(f"  {node_type}: {count}")
                 print(f"  {node_type}: {count}")
                 
+            logger.info("\n关系类型:")
             print("\n关系类型:")
             for rel_type, count in stats['relationship_types']:
+                logger.info(f"  {rel_type}: {count}")
                 print(f"  {rel_type}: {count}")
         
         # 步骤3：创建可视化
+        logger.info("\n=== 步骤3：创建知识图谱可视化 ===")
         print("\n=== 步骤3：创建知识图谱可视化 ===")
         visualization_path = os.path.join(output_dir, "函数编程知识图谱可视化.png")
         visualize_triples(unique_output_path, visualization_path)
         
+        logger.info(f"\n流程完成。结果保存到{output_dir}")
         print(f"\n流程完成。结果保存到{output_dir}")
         
     except Exception as e:
+        logger.error(f"执行过程中出错: {e}")
         print(f"执行过程中出错: {e}")
         import traceback
         traceback.print_exc()

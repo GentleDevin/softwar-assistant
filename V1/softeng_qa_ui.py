@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import logging
 import os
 import traceback
 from typing import List, Dict, Any, Tuple
@@ -13,200 +14,48 @@ from softeng_kg_qa import (
     # 导入独立的文档搜索函数 (给Tab用)
 )
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USERNAME = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4j123")  # **替换为你的实际密码**
+# 导入统一配置模块和格式化工具
+from config import get_neo4j_config, get_log_config
+from utils import setup_logger
+from utils.formatters import format_triples_as_html as format_kg_triples_html
+
+# 配置日志
+log_config = get_log_config()
+logger = setup_logger(__name__, log_file=log_config.log_file, log_level="DEBUG")
+
+# 从配置模块获取 Neo4j 配置
+neo4j_config = get_neo4j_config()
+NEO4J_URI = neo4j_config.uri
+NEO4J_USERNAME = neo4j_config.username
+NEO4J_PASSWORD = neo4j_config.password
 
 # --- 初始化 QA 系统 ---
 # 在Gradio应用启动前尝试初始化QA系统
 # 如果初始化失败，Gradio可能无法启动或功能不全
 try:
-    print("Initializing QA System for Gradio UI...")
+    logger.info("Initializing QA System for Gradio UI...")
     initialize_qa_system(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD)
-    print("QA System initialized successfully for UI.")
+    logger.info("QA System initialized successfully for UI.")
 except Exception as e:
-    print(f"FATAL ERROR: Failed to initialize QA System for UI: {e}")
+    logger.error(f"FATAL ERROR: Failed to initialize QA System for UI: {e}")
     QA_SYSTEM_INIT_ERROR = f"QA系统初始化失败: {e}"
 
 
 # --- Gradio UI 函数 ---
 
 def format_triples_as_html(context: Dict[str, Any]) -> str:
-    """将知识图谱三元组格式化为HTML表格展示"""
+    """将知识图谱三元组格式化为HTML表格展示（使用统一的格式化工具）"""
     # 注意：这个函数现在依赖于 answer_question 函数更新 QA system 实例的 current_kg_context
     try:
         qa_system = get_qa_system_instance()
-        kg_context = qa_system.current_kg_context # 从实例获取最新的 KG 上下文
+        kg_context = qa_system.current_kg_context  # 从实例获取最新的 KG 上下文
     except RuntimeError:
-            return "<p>错误：QA 系统未初始化。</p>"
+        return "<p>错误：QA 系统未初始化。</p>"
     except AttributeError:
-            return "<p>错误：无法从 QA 系统获取知识图谱上下文。</p>"
+        return "<p>错误：无法从 QA 系统获取知识图谱上下文。</p>"
 
-
-    if not kg_context or (not kg_context.get("entities") and not kg_context.get("paths")):
-            return "<p>未检索到相关的知识图谱信息。</p>"
-
-
-    html_parts = []
-    css_added = False # 确保 CSS 只添加一次
-
-    # 处理实体及其关系
-    if kg_context.get("entities"):
-            html_parts.append("<h4>知识图谱实体与关系：</h4>")
-            for entity_data in kg_context["entities"]:
-                entity = entity_data.get("entity", {})
-                relationships = entity_data.get("relationships", [])
-
-                if not entity or not entity.get("name"): continue
-
-                entity_name = entity.get("name", "未知")
-                entity_type = entity.get("type", "未知")
-
-                # 实体信息标题
-                html_parts.append(f"<h5>实体: {entity_name} (类型: {entity_type})</h5>")
-
-                # 构建关系表格
-                if relationships:
-                    if not css_added:
-                        # 添加CSS样式 (仅当有内容时添加一次)
-                        css = """
-                        <style>
-                        /* 针对Examples组件的样式 */
-                        .gr-examples button {
-                            background-color: #f0f7ff !important; 
-                            color: #2a81e3 !important;
-                            border: 1px solid #bde0ff !important; 
-                            border-radius: 20px !important;
-                            margin: 5px !important; 
-                            padding: 8px 18px !important; 
-                            font-size: 13px !important;
-                            transition: all 0.2s ease;
-                        }
-                        .gr-examples button:hover { 
-                            background-color: #e1f0ff !important; 
-                            box-shadow: 0 2px 5px rgba(42, 129, 227, 0.2); 
-                        }
-                        .styled-table {
-                            border-collapse: collapse; margin: 10px 0; font-size: 0.9em;
-                            font-family: sans-serif; min-width: 400px;
-                            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); width: 100%;
-                        }
-                        .styled-table th {
-                            background-color: #4a90e2; color: #ffffff; text-align: left;
-                            padding: 10px 12px; border: 1px solid #ddd;
-                        }
-                        .styled-table td {
-                            padding: 10px 12px; border: 1px solid #ddd;
-                        }
-                        .styled-table tbody tr:nth-of-type(even) { background-color: #f8f8f8; }
-                        .styled-table tbody tr:last-of-type { border-bottom: 2px solid #4a90e2; }
-                        h4 { margin-top: 15px; margin-bottom: 5px; color: #333; }
-                        h5 { margin-top: 10px; margin-bottom: 5px; color: #555; }
-                        </style>
-                        """
-                        html_parts.insert(0, css) # 插入到开头
-                        css_added = True
-
-                    html_parts.append("<table class='styled-table'>")
-                    html_parts.append("<tr><th>方向</th><th>关系</th><th>相关实体</th><th>类型</th></tr>")
-
-                    for rel in relationships:
-                        direction_arrow = ""
-                        rel_name = rel.get("rel_name") or rel.get("relationship", "未知关系")
-                        other_entity_name = ""
-                        other_entity_type = ""
-
-                        if rel.get("direction") == "outgoing":
-                            direction_arrow = f"{entity_name} →"
-                            other_entity_name = rel.get("target", "未知")
-                            other_entity_type = rel.get("target_type", "未知")
-                        elif rel.get("direction") == "incoming":
-                            direction_arrow = f"→ {entity_name}"
-                            other_entity_name = rel.get("source", "未知")
-                            other_entity_type = rel.get("source_type", "未知")
-                        else:
-                            direction_arrow = "?" # 未知方向
-
-                        html_parts.append(f"<tr><td>{direction_arrow}</td><td>{rel_name}</td><td>{other_entity_name}</td><td>{other_entity_type}</td></tr>")
-
-                    html_parts.append("</table>")
-                else:
-                    html_parts.append("<p style='font-size:0.9em; color:#777;'>（未找到该实体的直接关系）</p>")
-                html_parts.append("<br>")
-
-    # 处理实体间路径
-    if kg_context.get("paths"):
-            html_parts.append("<h4>知识图谱实体间路径：</h4>")
-            if not css_added: # 如果上面没加 CSS，这里加上
-                css = """
-                <style>
-                /* 针对Examples组件的样式 */
-                .gr-examples button {
-                    background-color: #f0f7ff !important; 
-                    color: #2a81e3 !important;
-                    border: 1px solid #bde0ff !important; 
-                    border-radius: 20px !important;
-                    margin: 5px !important; 
-                    padding: 8px 18px !important; 
-                    font-size: 13px !important;
-                    transition: all 0.2s ease;
-                }
-                .gr-examples button:hover { 
-                    background-color: #e1f0ff !important; 
-                    box-shadow: 0 2px 5px rgba(42, 129, 227, 0.2); 
-                }
-                .styled-table {
-                    border-collapse: collapse; margin: 10px 0; font-size: 0.9em;
-                    font-family: sans-serif; min-width: 400px;
-                    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); width: 100%;
-                }
-                .styled-table th {
-                    background-color: #4a90e2; color: #ffffff; text-align: left;
-                    padding: 10px 12px; border: 1px solid #ddd;
-                }
-                .styled-table td {
-                    padding: 10px 12px; border: 1px solid #ddd;
-                }
-                .styled-table tbody tr:nth-of-type(even) { background-color: #f8f8f8; }
-                .styled-table tbody tr:last-of-type { border-bottom: 2px solid #4a90e2; }
-                h4 { margin-top: 15px; margin-bottom: 5px; color: #333; }
-                h5 { margin-top: 10px; margin-bottom: 5px; color: #555; }
-                </style>
-                """
-                html_parts.insert(0, css)
-                css_added = True
-
-            for i, path_data in enumerate(kg_context["paths"]):
-                nodes = path_data.get("nodes", [])
-                relationships = path_data.get("relationships", [])
-                if not nodes or not relationships: continue
-
-                html_parts.append(f"<h5>路径 {i+1}:</h5>")
-                path_str_elements = []
-                for j, node in enumerate(nodes):
-                    node_name = node.get('name', '?')
-                    node_type = node.get('type', '?')
-                    path_str_elements.append(f"({node_name}<small>:{node_type}</small>)") # 显示类型
-                    if j < len(relationships):
-                        rel = relationships[j]
-                        rel_name = rel.get('name') or rel.get('type', 'RELATED_TO')
-                        # 判断方向
-                        if rel.get('source') == nodes[j].get('name'):
-                            path_str_elements.append(f"-[<small>{rel_name}</small>]-&gt;")
-                        else:
-                            path_str_elements.append(f"&lt;-[<small>{rel_name}</small>]-")
-
-                html_parts.append(f"<p style='font-family: monospace; font-size: 0.9em;'>{''.join(path_str_elements)}</p>")
-                html_parts.append("<br>")
-
-    if not html_parts: # 如果循环后仍然为空
-            return "<p>未能格式化知识图谱信息。</p>"
-
-    # 移除可能存在的初始 CSS（如果没有内容添加的话）
-    if not css_added and html_parts and html_parts[0].startswith("<style>"):
-            html_parts.pop(0)
-
-    return "\n".join(html_parts)
+    # 使用统一的格式化工具
+    return format_kg_triples_html(kg_context)
 
 
 def handle_file_upload(files):
@@ -216,15 +65,15 @@ def handle_file_upload(files):
         if not files:
             return "请选择至少一个文件上传"
 
-        print(f"UI: Processing upload of {len(files)} files...")
+        logger.info(f"UI: Processing upload of {len(files)} files...")
         # 调用导出的函数
         result = process_uploaded_files(files)
-        print("UI: File processing finished.")
+        logger.info("UI: File processing finished.")
         return result
     except Exception as e:
         error_msg = f"文件上传处理错误: {str(e)}"
-        print(error_msg)
-        traceback.print_exc()
+        logger.error(error_msg)
+        logger.debug(traceback.format_exc())
         return error_msg
 
 # 新增函数：格式化智能体信息为HTML
@@ -280,7 +129,7 @@ def answer_question_ui(question: str, chat_history) -> Tuple[Any, str, str, str]
         if not question or question.strip() == "":
             return chat_history, "", "", ""
 
-        print(f"UI: Answering question: '{question}'")
+        logger.info(f"UI: Answering question: '{question}'")
 
         # --- 调用核心问答函数 ---
         response = qa_system.answer_question(question)
@@ -322,17 +171,17 @@ def answer_question_ui(question: str, chat_history) -> Tuple[Any, str, str, str]
             new_history = chat_history if chat_history else []
             new_history = new_history + [[question, formatted_answer]]
 
-        print("UI: Answer and contexts retrieved.")
+        logger.info("UI: Answer and contexts retrieved.")
         return new_history, triples_html, search_output_html, ""  # 增加第四个返回值（空字符串）
 
     except RuntimeError as e: # QA 系统未初始化
             error_msg = f"系统错误: {str(e)}"
-            print(error_msg)
+            logger.error(error_msg)
             return chat_history, "<p>QA系统未初始化</p>", "<p>QA系统未初始化</p>", error_msg
     except Exception as e:
         error_msg = f"处理问题时发生意外错误: {str(e)}"
-        print(error_msg)
-        traceback.print_exc()
+        logger.error(error_msg)
+        logger.debug(traceback.format_exc())
         return chat_history, f"<p>处理时出错: {e}</p>", f"<p>处理时出错: {e}</p>", error_msg
 
 def clear_conversation(chat_history) -> List:
@@ -340,10 +189,10 @@ def clear_conversation(chat_history) -> List:
     try:
         qa_system = get_qa_system_instance()
         qa_system.clear_conversation_history()
-        print("UI: Conversation history cleared.")
+        logger.info("UI: Conversation history cleared.")
         return []
     except Exception as e:
-        print(f"清除对话历史时出错: {e}")
+        logger.error(f"清除对话历史时出错: {e}")
         return chat_history
 
 # 创建Gradio界面
@@ -572,12 +421,12 @@ def create_ui():
 if __name__ == "__main__":
     # 检查 QA 系统是否成功初始化
     if 'QA_SYSTEM_INIT_ERROR' in globals() and QA_SYSTEM_INIT_ERROR:
-            print(f"\n!!! Gradio UI cannot start due to QA System initialization error: {QA_SYSTEM_INIT_ERROR} !!!")
+            logger.error(f"!!! Gradio UI cannot start due to QA System initialization error: {QA_SYSTEM_INIT_ERROR} !!!")
             with gr.Blocks() as error_app:
                 gr.Markdown(f"# 系统启动失败\n\n无法初始化问答系统，请检查配置和后台服务。\n\n**错误信息:**\n```\n{QA_SYSTEM_INIT_ERROR}\n```")
-            print("\nLaunching error display UI...")
+            logger.info("\nLaunching error display UI...")
             error_app.launch(share=True)
     else:
-            print("\nLaunching Gradio UI...")
+            logger.info("\nLaunching Gradio UI...")
             app = create_ui()
             app.launch(share=True) # share=True 会创建公网链接
