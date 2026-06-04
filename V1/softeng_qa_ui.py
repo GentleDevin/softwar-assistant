@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 import os
-import json
-import gradio as gr
-import pandas as pd
-from typing import List, Dict, Any, Tuple, Optional
 import traceback
+from typing import List, Dict, Any, Tuple
+
+import gradio as gr
 
 # 导入问答系统和RAG相关函数
 from softeng_kg_qa import (
-    initialize_qa_system, # 导入初始化函数
-    get_qa_system_instance, # 导入获取实例函数
-    process_uploaded_files, # 导入处理文件函数
-    search_documents # 导入独立的文档搜索函数 (给Tab用)
+    initialize_qa_system,  # 导入初始化函数
+    get_qa_system_instance,  # 导入获取实例函数
+    process_uploaded_files,  # 导入处理文件函数
+    # 导入独立的文档搜索函数 (给Tab用)
 )
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -577,8 +576,8 @@ if __name__ == "__main__":
             with gr.Blocks() as error_app:
                 gr.Markdown(f"# 系统启动失败\n\n无法初始化问答系统，请检查配置和后台服务。\n\n**错误信息:**\n```\n{QA_SYSTEM_INIT_ERROR}\n```")
             print("\nLaunching error display UI...")
-            error_app.launch(share=False)
+            error_app.launch(share=True)
     else:
             print("\nLaunching Gradio UI...")
             app = create_ui()
-            app.launch(share=False) # share=True 会创建公网链接
+            app.launch(share=True) # share=True 会创建公网链接
