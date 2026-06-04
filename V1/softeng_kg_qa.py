@@ -47,9 +47,9 @@ RELATIONSHIP_TYPES = [
 ]
 
 # --- 嵌入模型配置 ---
-RAG_EMBEDDING_MODEL = "text-embedding-3-small"
+RAG_EMBEDDING_MODEL = "text-embedding-v3"
 RAG_EMBEDDING_DIMENSION = 1536
-ENTITY_EMBEDDING_MODEL = "text-embedding-3-small"
+ENTITY_EMBEDDING_MODEL = "text-embedding-v3"
 ENTITY_EMBEDDING_DIMENSION = 1536
 
 class RAGManager:

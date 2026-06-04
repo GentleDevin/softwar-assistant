@@ -577,8 +577,8 @@ if __name__ == "__main__":
             with gr.Blocks() as error_app:
                 gr.Markdown(f"# 系统启动失败\n\n无法初始化问答系统，请检查配置和后台服务。\n\n**错误信息:**\n```\n{QA_SYSTEM_INIT_ERROR}\n```")
             print("\nLaunching error display UI...")
-            error_app.launch(share=False)
+            error_app.launch(share=True)
     else:
             print("\nLaunching Gradio UI...")
             app = create_ui()
-            app.launch(share=False) # share=True 会创建公网链接
+            app.launch(share=True) # share=True 会创建公网链接
