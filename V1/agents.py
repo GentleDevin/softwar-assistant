@@ -4,30 +4,83 @@ import logging
 import re
 from typing import List, Dict, Any, Tuple, Optional
 
-from langchain_classic import LLMChain
+from langchain_classic.chains import LLMChain
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import Tool
 from langchain_openai import ChatOpenAI
 
+# 使用统一的日志配置
+from utils import setup_logger
+
 # 配置日志
-logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+logger = setup_logger(__name__)
 
 
 class Agent:
     """所有软件工程智能体的基类"""
+    
+    # 智能体配置注册表 - 避免每个子类重复写 __init__
+    AGENT_CONFIGS = {
+        "ConceptExplanationAgent": {
+            "name": "概念解释智能体",
+            "description": "清晰全面地解释软件工程概念、术语和方法论",
+            "system_message": "你是软件工程课程助手中的概念解释专家，专长于清晰、准确地解释软件工程概念、术语和方法论。你的解释既权威又易于理解，适合不同层次的学生。你会根据对话历史提供连贯的解释。"
+        },
+        "RequirementsAnalysisAgent": {
+            "name": "需求分析智能体",
+            "description": "协助需求工程、需求获取和需求分析",
+            "system_message": "你是软件工程课程助手中的需求分析专家，擅长需求工程各个方面，包括需求获取、分析、规格说明和管理。你提供的建议遵循业界最佳实践和标准，帮助学生理解并应用需求工程技术。你会根据对话历史提供连贯的指导。"
+        },
+        "SoftwareDesignAgent": {
+            "name": "软件设计智能体",
+            "description": "协助软件架构、设计模式和建模",
+            "system_message": "你是软件工程课程助手中的软件设计专家，精通软件架构、设计模式、建模技术和设计原则。你帮助学生理解如何设计可维护、可扩展和高质量的软件系统。你会根据对话历史提供连续的设计指导。"
+        },
+        "SoftwareTestingAgent": {
+            "name": "软件测试智能体",
+            "description": "专注于测试策略、测试用例和质量保证",
+            "system_message": "你是软件工程课程助手中的软件测试专家，精通各种测试方法、测试类型、测试工具和质量保证流程。你帮助学生理解如何设计和执行有效的测试策略，确保软件质量。你会根据对话历史提供深入的测试指导。"
+        },
+        "ProjectManagementAgent": {
+            "name": "项目管理智能体",
+            "description": "协助软件开发生命周期、方法论和团队管理",
+            "system_message": "你是软件工程课程助手中的项目管理专家，精通软件开发生命周期、开发方法论、团队管理和项目规划。你帮助学生理解如何有效管理软件项目，应用合适的方法论，并解决项目管理中的挑战。你会基于对话历史提供更深入的项目管理指导。"
+        },
+        "CodeImplementationAgent": {
+            "name": "代码实现智能体",
+            "description": "协助编码实践、算法和实现细节",
+            "system_message": "你是软件工程课程助手中的代码实现专家，精通编程语言、算法、数据结构和编码最佳实践。你帮助学生实现高质量、可维护的代码，并理解软件工程中的编程实践。你会基于对话历史提供连续的代码指导。"
+        },
+        "SoftwareEthicsAgent": {
+            "name": "软件伦理智能体",
+            "description": "处理软件伦理、职业道德和社会影响相关问题",
+            "system_message": "你是软件工程课程助手中的软件伦理专家，关注软件开发和应用中的伦理考量、社会责任和职业道德。你帮助学生理解和应对软件系统带来的伦理挑战和社会影响。你会基于对话历史深入探讨伦理问题。"
+        }
+    }
     
     def __init__(self, llm: ChatOpenAI, name: str, description: str, system_message: str):
         self.llm = llm
         self.name = name
         self.description = description
         self.system_message = system_message
+    
+    def _init_from_config(self, llm: ChatOpenAI, agent_config_key: str = None):
+        """
+        从配置字典初始化当前实例
+        如果不提供 config_key，则使用类名作为键
+        """
+        if agent_config_key is None:
+            agent_config_key = self.__class__.__name__
+        
+        config = self.AGENT_CONFIGS.get(agent_config_key)
+        if not config:
+            raise ValueError(f"未找到智能体配置: {agent_config_key}")
+        
+        self.llm = llm
+        self.name = config["name"]
+        self.description = config["description"]
+        self.system_message = config["system_message"]
     
     def process(self, question: str, kg_context: Dict[str, Any], 
                 entities: List[Dict[str, str]], doc_results: List[Dict[str, Any]],
@@ -177,12 +230,7 @@ class ConceptExplanationAgent(Agent):
     """专门解释软件工程概念的智能体"""
     
     def __init__(self, llm: ChatOpenAI):
-        super().__init__(
-            llm,
-            "概念解释智能体",
-            "清晰全面地解释软件工程概念、术语和方法论",
-            "你是软件工程课程助手中的概念解释专家，专长于清晰、准确地解释软件工程概念、术语和方法论。你的解释既权威又易于理解，适合不同层次的学生。你会根据对话历史提供连贯的解释。"
-        )
+        self._init_from_config(llm)
     
     def _get_prompt_template(self) -> PromptTemplate:
         template = """
@@ -214,12 +262,7 @@ class RequirementsAnalysisAgent(Agent):
     """专门处理需求工程和分析的智能体"""
     
     def __init__(self, llm: ChatOpenAI):
-        super().__init__(
-            llm,
-            "需求分析智能体",
-            "协助需求工程、需求获取和需求分析",
-            "你是软件工程课程助手中的需求分析专家，擅长需求工程各个方面，包括需求获取、分析、规格说明和管理。你提供的建议遵循业界最佳实践和标准，帮助学生理解并应用需求工程技术。你会根据对话历史提供连贯的指导。"
-        )
+        self._init_from_config(llm)
     
     def _get_prompt_template(self) -> PromptTemplate:
         template = """
@@ -251,12 +294,7 @@ class SoftwareDesignAgent(Agent):
     """专门处理软件架构和设计的智能体"""
     
     def __init__(self, llm: ChatOpenAI):
-        super().__init__(
-            llm,
-            "软件设计智能体",
-            "协助软件架构、设计模式和建模",
-            "你是软件工程课程助手中的软件设计专家，精通软件架构、设计模式、建模技术和设计原则。你帮助学生理解如何设计可维护、可扩展和高质量的软件系统。你会根据对话历史提供连续的设计指导。"
-        )
+        self._init_from_config(llm)
     
     def _get_prompt_template(self) -> PromptTemplate:
         template = """
@@ -288,12 +326,7 @@ class SoftwareTestingAgent(Agent):
     """专门处理软件测试和质量保证的智能体"""
     
     def __init__(self, llm: ChatOpenAI):
-        super().__init__(
-            llm,
-            "软件测试智能体",
-            "专注于测试策略、测试用例和质量保证",
-            "你是软件工程课程助手中的软件测试专家，精通各种测试方法、测试类型、测试工具和质量保证流程。你帮助学生理解如何设计和执行有效的测试策略，确保软件质量。你会根据对话历史提供深入的测试指导。"
-        )
+        self._init_from_config(llm)
     
     def _get_prompt_template(self) -> PromptTemplate:
         template = """
@@ -325,12 +358,7 @@ class ProjectManagementAgent(Agent):
     """专门处理软件项目管理和方法论的智能体"""
     
     def __init__(self, llm: ChatOpenAI):
-        super().__init__(
-            llm,
-            "项目管理智能体",
-            "协助软件开发生命周期、方法论和团队管理",
-            "你是软件工程课程助手中的项目管理专家，精通软件开发生命周期、开发方法论、团队管理和项目规划。你帮助学生理解如何有效管理软件项目，应用合适的方法论，并解决项目管理中的挑战。你会基于对话历史提供更深入的项目管理指导。"
-        )
+        self._init_from_config(llm)
     
     def _get_prompt_template(self) -> PromptTemplate:
         template = """
@@ -362,12 +390,7 @@ class CodeImplementationAgent(Agent):
     """专门处理编码实践和实现的智能体"""
     
     def __init__(self, llm: ChatOpenAI):
-        super().__init__(
-            llm,
-            "代码实现智能体",
-            "协助编码实践、算法和实现细节",
-            "你是软件工程课程助手中的代码实现专家，精通编程语言、算法、数据结构和编码最佳实践。你帮助学生实现高质量、可维护的代码，并理解软件工程中的编程实践。你会基于对话历史提供连续的代码指导。"
-        )
+        self._init_from_config(llm)
     
     def _get_prompt_template(self) -> PromptTemplate:
         template = """
@@ -399,12 +422,7 @@ class SoftwareEthicsAgent(Agent):
     """专门处理软件伦理和职业道德的智能体"""
     
     def __init__(self, llm: ChatOpenAI):
-        super().__init__(
-            llm,
-            "软件伦理智能体",
-            "处理软件伦理、职业道德和社会影响相关问题",
-            "你是软件工程课程助手中的软件伦理专家，关注软件开发和应用中的伦理考量、社会责任和职业道德。你帮助学生理解和应对软件系统带来的伦理挑战和社会影响。你会基于对话历史深入探讨伦理问题。"
-        )
+        self._init_from_config(llm)
     
     def _get_prompt_template(self) -> PromptTemplate:
         template = """

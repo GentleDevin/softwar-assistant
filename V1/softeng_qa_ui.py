@@ -195,103 +195,103 @@ def clear_conversation(chat_history) -> List:
         logger.error(f"清除对话历史时出错: {e}")
         return chat_history
 
+# 自定义CSS样式
+custom_css = """
+body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+h1 { color: #2a81e3; text-align: center; font-size: 28px; margin-bottom: 5px; font-weight: bold; }
+h2 { font-size: 18px; margin-top: 0; margin-bottom: 15px; color: #555; text-align: center; font-weight: normal; }
+h3 { color: #333; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px;}
+h4 { color: #444; margin-top: 15px; margin-bottom: 10px; font-size: 1.1em; }
+
+/* 增加容器最大宽度 */
+.container { max-width: 1600px; margin: 20px auto; padding: 0 15px; }
+
+.header { text-align: center; margin-bottom: 30px; }
+.upload-section, .qa-section {
+    background-color: white; padding: 20px; border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 25px;
+}
+.chat-section {
+    background-color: white; padding: 20px; border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 20px;
+}
+
+/* 改进聊天消息样式，减少空白 */
+.message { 
+    margin: 8px 0; 
+    padding: 8px 12px;
+    border-radius: 10px;
+}
+.user-message {
+    text-align: right;
+    background-color: #e1f0ff;
+    margin-left: 35%;  /* 减少左侧空白 */
+    display: inline-block;
+    max-width: 65%;
+}
+.assistant-message {
+    text-align: left;
+    background-color: #f0f0f0;
+    margin-right: 15%;  /* 减少右侧空白 */
+    display: inline-block;
+    max-width: 85%;
+}
+
+/* 优化聊天框样式 */
+.chatbot {
+    max-width: 100% !important;
+}
+.chatbot .message-wrap {
+    padding: 10px 20px !important;
+}
+
+/* 添加可调节的对话区域 */
+.resizable-chat {
+    resize: horizontal;
+    overflow: auto;
+    min-width: 600px;
+    max-width: 100%;
+}
+
+.example-btn { 
+    background-color: #f0f7ff !important; color: #2a81e3 !important;
+    border: 1px solid #bde0ff !important; border-radius: 20px !important;
+    margin: 5px !important; padding: 8px 18px !important; font-size: 13px !important;
+    transition: all 0.2s ease;
+}
+.example-btn:hover { background-color: #e1f0ff !important; box-shadow: 0 2px 5px rgba(42, 129, 227, 0.2); }
+.submit-btn { 
+    background-color: #2a81e3 !important; color: white !important; font-weight: bold;
+    border-radius: 8px !important; padding: 12px 20px !important; font-size: 15px !important;
+    transition: background-color 0.2s ease;
+}
+.submit-btn:hover { background-color: #1e6ac7 !important; }
+.clear-btn { 
+    background-color: #dc3545 !important; color: white !important;
+    border-radius: 8px !important; padding: 10px 16px !important; font-size: 14px !important;
+}
+.clear-btn:hover { background-color: #c82333 !important; }
+.tab-content { 
+    padding: 20px; background-color: #ffffff; border-radius: 0 0 8px 8px;
+    border: 1px solid #dee2e6; border-top: none; min-height: 200px;
+}
+footer { text-align: center; margin-top: 30px; color: #888; font-size: 12px; }
+.book-icon { font-size: 36px; color: #2a81e3; margin-right: 10px; vertical-align: middle;}
+.gr-label { 
+    font-weight: bold !important; color: #555 !important; margin-bottom: 5px !important;
+}
+.gr-box { border-radius: 8px !important; }
+.gr-input { border-radius: 8px !important; }
+.gr-button { border-radius: 8px !important; }
+.gr-dropdown { border-radius: 8px !important; }
+.gr-tabs { border-radius: 8px 8px 0 0 !important; }
+"""
+
 # 创建Gradio界面
 def create_ui():
-    """创建问答系统UI界面"""
-    # 自定义CSS样式
-    css = """
-    body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    h1 { color: #2a81e3; text-align: center; font-size: 28px; margin-bottom: 5px; font-weight: bold; }
-    h2 { font-size: 18px; margin-top: 0; margin-bottom: 15px; color: #555; text-align: center; font-weight: normal; }
-    h3 { color: #333; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px;}
-    h4 { color: #444; margin-top: 15px; margin-bottom: 10px; font-size: 1.1em; }
-    
-    /* 增加容器最大宽度 */
-    .container { max-width: 1600px; margin: 20px auto; padding: 0 15px; }
-    
-    .header { text-align: center; margin-bottom: 30px; }
-    .upload-section, .qa-section {
-        background-color: white; padding: 20px; border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 25px;
-    }
-    .chat-section {
-        background-color: white; padding: 20px; border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 20px;
-    }
-    
-    /* 改进聊天消息样式，减少空白 */
-    .message { 
-        margin: 8px 0; 
-        padding: 8px 12px;
-        border-radius: 10px;
-    }
-    .user-message {
-        text-align: right;
-        background-color: #e1f0ff;
-        margin-left: 35%;  /* 减少左侧空白 */
-        display: inline-block;
-        max-width: 65%;
-    }
-    .assistant-message {
-        text-align: left;
-        background-color: #f0f0f0;
-        margin-right: 15%;  /* 减少右侧空白 */
-        display: inline-block;
-        max-width: 85%;
-    }
-    
-    /* 优化聊天框样式 */
-    .chatbot {
-        max-width: 100% !important;
-    }
-    .chatbot .message-wrap {
-        padding: 10px 20px !important;
-    }
-    
-    /* 添加可调节的对话区域 */
-    .resizable-chat {
-        resize: horizontal;
-        overflow: auto;
-        min-width: 600px;
-        max-width: 100%;
-    }
-    
-    .example-btn { 
-        background-color: #f0f7ff !important; color: #2a81e3 !important;
-        border: 1px solid #bde0ff !important; border-radius: 20px !important;
-        margin: 5px !important; padding: 8px 18px !important; font-size: 13px !important;
-        transition: all 0.2s ease;
-    }
-    .example-btn:hover { background-color: #e1f0ff !important; box-shadow: 0 2px 5px rgba(42, 129, 227, 0.2); }
-    .submit-btn { 
-        background-color: #2a81e3 !important; color: white !important; font-weight: bold;
-        border-radius: 8px !important; padding: 12px 20px !important; font-size: 15px !important;
-        transition: background-color 0.2s ease;
-    }
-    .submit-btn:hover { background-color: #1e6ac7 !important; }
-    .clear-btn { 
-        background-color: #dc3545 !important; color: white !important;
-        border-radius: 8px !important; padding: 10px 16px !important; font-size: 14px !important;
-    }
-    .clear-btn:hover { background-color: #c82333 !important; }
-    .tab-content { 
-        padding: 20px; background-color: #ffffff; border-radius: 0 0 8px 8px;
-        border: 1px solid #dee2e6; border-top: none; min-height: 200px;
-    }
-    footer { text-align: center; margin-top: 30px; color: #888; font-size: 12px; }
-    .book-icon { font-size: 36px; color: #2a81e3; margin-right: 10px; vertical-align: middle;}
-    .gr-label { 
-        font-weight: bold !important; color: #555 !important; margin-bottom: 5px !important;
-    }
-    .gr-box { border-radius: 8px !important; }
-    .gr-input { border-radius: 8px !important; }
-    .gr-button { border-radius: 8px !important; }
-    .gr-dropdown { border-radius: 8px !important; }
-    .gr-tabs { border-radius: 8px 8px 0 0 !important; }
-    """
 
 
-    with gr.Blocks(css=css, theme=gr.themes.Soft()) as app:
+    with gr.Blocks() as app:
         with gr.Column(elem_classes=["container"]):
             # 标题区域
             with gr.Row():
@@ -304,8 +304,8 @@ def create_ui():
 
             # 主要布局：调整比例，让右侧更宽
             with gr.Row(variant="panel"):
-                # 左侧上传部分 - 减小scale
-                with gr.Column(scale=0.8, min_width=300, elem_classes=["upload-section"]):
+                # 左侧上传部分 - 减小scale（使用整数）
+                with gr.Column(scale=1, min_width=300, elem_classes=["upload-section"]):
                     gr.HTML("<h3>📥 上传课程资料</h3>")
                     file_upload = gr.File(
                         file_types=[".txt", ".pdf"],
@@ -316,8 +316,8 @@ def create_ui():
                     upload_status = gr.Textbox(label="文件处理状态", lines=8, interactive=False, 
                                             placeholder="上传并处理文件后，这里会显示状态...")
 
-                # 右侧问答和对话部分 - 增大scale并调整min_width
-                with gr.Column(scale=2.5, min_width=800, elem_classes=["resizable-chat"]):
+                # 右侧问答和对话部分 - 增大scale（使用整数）并调整min_width
+                with gr.Column(scale=3, min_width=800, elem_classes=["resizable-chat"]):
                     # 对话聊天部分
                     with gr.Column(elem_classes=["chat-section"]):
                         gr.HTML("<h3>💬 课程对话</h3>")
@@ -429,4 +429,8 @@ if __name__ == "__main__":
     else:
             logger.info("\nLaunching Gradio UI...")
             app = create_ui()
-            app.launch(share=True) # share=True 会创建公网链接
+            app.launch(
+                share=True,
+                css=custom_css,
+                theme=gr.themes.Soft()
+            ) # share=True 会创建公网链接
