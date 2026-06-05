@@ -81,7 +81,7 @@ class QASystemConfig:
     # System configurations
     max_conversation_history: int = 10
     log_level: str = "INFO"
-    log_file: str = "qa_system.log"
+    log_file: str = "logs/app.log"
     enable_monitoring: bool = True
     enable_health_check: bool = True
     

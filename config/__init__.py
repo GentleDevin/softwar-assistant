@@ -10,7 +10,7 @@ from core.config import (
 )
 
 # Backward compatibility wrappers
-from config.loader import (
+from .loader import (
     load_config, init_config, get_config,
     get_neo4j_config, get_llm_config, get_rag_config, get_log_config
 )

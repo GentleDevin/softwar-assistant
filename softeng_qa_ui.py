@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+import time
 import traceback
 from typing import List, Dict, Any, Tuple
 
@@ -114,75 +115,106 @@ def format_agent_info_html(agent_name: str) -> str:
 <div style="color: #555; font-size: 0.9em; margin-top: 4px;">{description}</div>
 </div>"""
 
-# answer_question_ui 函数以处理多轮对话
-def answer_question_ui(question: str, chat_history) -> Tuple[Any, str, str, str]:
-    """处理问题并更新对话历史"""
-    global QA_SYSTEM_INIT_ERROR # 引用全局错误状态
+def answer_question_ui(question: str, chat_history):
+    """处理问题并更新对话历史，使用生成器实现实时进度显示"""
+    global QA_SYSTEM_INIT_ERROR
     if 'QA_SYSTEM_INIT_ERROR' in globals() and QA_SYSTEM_INIT_ERROR:
-            error_msg = f"系统错误：{QA_SYSTEM_INIT_ERROR}"
-            return chat_history, error_msg, error_msg, ""
+        error_msg = f"系统错误：{QA_SYSTEM_INIT_ERROR}"
+        yield chat_history, error_msg, error_msg, ""
+        return
 
     try:
-        # 获取 QA 系统实例
         qa_system = get_qa_system_instance()
 
         if not question or question.strip() == "":
-            return chat_history, "", "", ""
+            yield chat_history, "", "", ""
+            return
 
         logger.info(f"UI: Answering question: '{question}'")
 
-        # --- 调用核心问答函数 ---
-        response = qa_system.answer_question(question)
+        start_time = time.time()
+        
+        # 初始状态
+        current_triples = ""
+        current_docs = ""
+        
+        # 使用线程在后台处理
+        import threading
+        result_container = {}
+        
+        def do_work():
+            # 执行实际工作
+            response = qa_system.answer_question(question)
+            # 获取最终结果
+            triples_html = format_triples_as_html({})
+            doc_results_raw = qa_system.current_doc_results_raw
+            rag_manager = qa_system.rag_manager
+            search_output_html = rag_manager.format_search_results_as_html(doc_results_raw)
+            result_container['response'] = response
+            result_container['triples'] = triples_html
+            result_container['docs'] = search_output_html
+            result_container['done'] = True
+        
+        result_container['done'] = False
+        thread = threading.Thread(target=do_work)
+        thread.start()
+        
+        # 实时更新进度显示
+        while not result_container['done']:
+            elapsed = time.time() - start_time
+            status = f"processing | {elapsed:.1f}s"
+            yield chat_history, current_triples, current_docs, status
+            time.sleep(0.1)
+        
+        # 等待线程完成
+        thread.join()
+        total_time = time.time() - start_time
+        
+        # 获取结果
+        response = result_container['response']
+        final_triples = result_container['triples']
+        final_docs = result_container['docs']
         
         # 从响应中提取答案和智能体名称
         if isinstance(response, dict):
             answer = response.get("answer", "未能获取答案")
             agent_name = response.get("agent_name", "未知智能体")
+            perf_data = response.get("performance", {})
         else:
-            # 兼容旧格式（如果 answer_question 没有更新）
             answer = response
             agent_name = "未知智能体"
-
-        # --- 获取并格式化知识图谱结果 ---
-        # format_triples_as_html 会从 qa_system 获取最新上下文
-        triples_html = format_triples_as_html({}) # 传递空字典，让函数内部获取
-
-        # --- 获取并格式化文档检索结果 ---
-        doc_results_raw = qa_system.current_doc_results_raw
-        rag_manager = qa_system.rag_manager
-        search_output_html = rag_manager.format_search_results_as_html(doc_results_raw)
+            perf_data = {}
 
         # 创建智能体信息HTML
         agent_info_html = format_agent_info_html(agent_name)
-        
-        # 结合智能体信息和答案
         formatted_answer = f"{agent_info_html}\n\n{answer}"
 
-        # 更新对话历史 - 根据Gradio版本使用不同格式
+        # 更新对话历史
         try:
-            # 尝试使用新格式（带role和content的字典）
             new_history = chat_history if chat_history else []
             new_history = new_history + [
                 {"role": "user", "content": question},
                 {"role": "assistant", "content": formatted_answer}
             ]
         except:
-            # 如果新格式失败，使用旧格式（tuples）
             new_history = chat_history if chat_history else []
             new_history = new_history + [[question, formatted_answer]]
 
-        logger.info("UI: Answer and contexts retrieved.")
-        return new_history, triples_html, search_output_html, ""  # 增加第四个返回值（空字符串）
+        # 显示最终响应时间
+        final_status = f"响应完成 | 总耗时: {total_time:.2f}秒"
+        
+        logger.info(f"UI: Answer and contexts retrieved. 耗时: {total_time:.3f}s")
+        yield new_history, final_triples, final_docs, final_status
 
-    except RuntimeError as e: # QA 系统未初始化
-            error_msg = f"系统错误: {str(e)}"
-            logger.error(error_msg)
-            return chat_history, "<p>QA系统未初始化</p>", "<p>QA系统未初始化</p>", error_msg
+    except RuntimeError as e:
+        error_msg = f"系统错误: {str(e)}"
+        logger.error(error_msg)
+        yield chat_history, "<p>QA系统未初始化</p>", "<p>QA系统未初始化</p>", error_msg
     except Exception as e:
         error_msg = f"处理问题时发生意外错误: {str(e)}"
         logger.error(error_msg)
         logger.debug(traceback.format_exc())
-        return chat_history, f"<p>处理时出错: {e}</p>", f"<p>处理时出错: {e}</p>", error_msg
+        yield chat_history, f"<p>处理时出错: {e}</p>", f"<p>处理时出错: {e}</p>", error_msg
 
 def clear_conversation(chat_history) -> List:
     """清除对话历史"""
@@ -283,14 +315,23 @@ footer { text-align: center; margin-top: 30px; color: #888; font-size: 12px; }
 .gr-box { border-radius: 8px !important; }
 .gr-input { border-radius: 8px !important; }
 .gr-button { border-radius: 8px !important; }
-.gr-dropdown { border-radius: 8px !important; }
-.gr-tabs { border-radius: 8px 8px 0 0 !important; }
+.gr-dropdown { border-radius: 8px 8px 0 0 !important; }
+
+/* 状态显示样式 */
+.status-display {
+    color: #2a81e3;
+    font-size: 0.9em;
+    padding: 6px 16px;
+    background-color: #f0f7ff;
+    border-radius: 6px;
+    border: 1px solid #c9e2ff;
+    font-family: monospace;
+    font-weight: 500;
+}
 """
 
 # 创建Gradio界面
 def create_ui():
-
-
     with gr.Blocks() as app:
         with gr.Column(elem_classes=["container"]):
             # 标题区域
@@ -342,10 +383,13 @@ def create_ui():
                             )
                             submit_button = gr.Button("发送", variant="primary", scale=1)
                         
+                        # 状态显示区域
+                        with gr.Row():
+                            status_display = gr.Markdown("", elem_classes="status-display")
+                        
                         # 操作按钮行
                         with gr.Row():
                             clear_button = gr.Button("清除对话历史", variant="secondary", elem_classes=["clear-btn"])
-                            status_output = gr.Textbox(label="状态信息", visible=False)
                     
                     # 详细信息标签页
                     gr.HTML("<h3>🔍 详细信息</h3>")
@@ -388,7 +432,7 @@ def create_ui():
         submit_button.click(
             fn=answer_question_ui,
             inputs=[question_input, chat_display],
-            outputs=[chat_display, triples_output, search_output_html, status_output]
+            outputs=[chat_display, triples_output, search_output_html, status_display]
         ).then(
             # 清空输入框
             lambda: "",
@@ -400,7 +444,7 @@ def create_ui():
         question_input.submit(
             fn=answer_question_ui,
             inputs=[question_input, chat_display],
-            outputs=[chat_display, triples_output, search_output_html, status_output]
+            outputs=[chat_display, triples_output, search_output_html, status_display]
         ).then(
             # 清空输入框
             lambda: "",
@@ -429,6 +473,7 @@ if __name__ == "__main__":
     else:
             logger.info("\nLaunching Gradio UI...")
             app = create_ui()
+            app.queue()  # 启用队列以支持生成器
             app.launch(
                 share=True,
                 css=custom_css,

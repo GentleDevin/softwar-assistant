@@ -40,20 +40,26 @@ from models import (
 
 # ========== 配置管理导入 ==========
 from config import (
-    AppConfig, Neo4jConfig as AppNeo4jConfig, LLMConfig as AppLLMConfig,
-    RAGConfig as AppRAGConfig, LogConfig,
+    QASystemConfig as AppConfig,
+    Neo4jConfig as AppNeo4jConfig,
+    LLMConfig as AppLLMConfig,
+    RAGConfig as AppRAGConfig,
     load_config, init_config, get_config,
     get_neo4j_config, get_llm_config, get_rag_config, get_log_config
 )
 
 # ========== 智能体系统导入 ==========
-from agents import (
-    Agent,
-    ConceptExplanationAgent, RequirementsAnalysisAgent, SoftwareDesignAgent,
-    SoftwareTestingAgent, ProjectManagementAgent, CodeImplementationAgent, SoftwareEthicsAgent,
-    AgentCoordinator,
-    select_agents_function, synthesize_answers_function
-)
+try:
+    from agents import (
+        Agent,
+        ConceptExplanationAgent, RequirementsAnalysisAgent, SoftwareDesignAgent,
+        SoftwareTestingAgent, ProjectManagementAgent, CodeImplementationAgent, SoftwareEthicsAgent,
+        AgentCoordinator,
+        select_agents_function, synthesize_answers_function
+    )
+    AGENTS_AVAILABLE = True
+except ImportError:
+    AGENTS_AVAILABLE = False
 
 # ========== 主系统导入（延迟导入以避免自动初始化） ==========
 def __getattr__(name):
@@ -94,18 +100,21 @@ __all__ = [
     "Entity", "EntityType", "QuestionInput", "AnswerOutput", "SearchResult", "FileUploadResult",
     
     # 配置管理
-    "AppConfig", "AppNeo4jConfig", "AppLLMConfig", "AppRAGConfig", "LogConfig",
+    "AppConfig", "AppNeo4jConfig", "AppLLMConfig", "AppRAGConfig",
     "load_config", "init_config", "get_config",
     "get_neo4j_config", "get_llm_config", "get_rag_config", "get_log_config",
     
-    # 智能体系统
-    "Agent",
-    "ConceptExplanationAgent", "RequirementsAnalysisAgent", "SoftwareDesignAgent",
-    "SoftwareTestingAgent", "ProjectManagementAgent", "CodeImplementationAgent", "SoftwareEthicsAgent",
-    "AgentCoordinator",
-    "select_agents_function", "synthesize_answers_function",
-    
-    # 主系统
-    "RAGManager", "Neo4jHandler", "EntityExtractor", "EntityMatcher", "AnswerGenerator",
-    "SoftwareEngineeringQASystem", "initialize_qa_system"
+    # 主系统（延迟导入）
+    "RAGManager", "Neo4jHandler", "EntityExtractor", "EntityMatcher",
+    "AnswerGenerator", "SoftwareEngineeringQASystem", "initialize_qa_system"
 ]
+
+# 智能体系统（如果可用）
+if AGENTS_AVAILABLE:
+    __all__.extend([
+        "Agent",
+        "ConceptExplanationAgent", "RequirementsAnalysisAgent", "SoftwareDesignAgent",
+        "SoftwareTestingAgent", "ProjectManagementAgent", "CodeImplementationAgent", "SoftwareEthicsAgent",
+        "AgentCoordinator",
+        "select_agents_function", "synthesize_answers_function"
+    ])

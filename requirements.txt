@@ -1,0 +1,26 @@
+# Core dependencies
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+openai>=1.0.0
+
+# Vector database
+faiss-cpu>=1.7.0
+numpy>=1.24.0
+
+# Graph database
+neo4j>=5.0.0
+langchain-neo4j>=0.0.1
+
+# Document processing
+pypdf>=3.0.0
+
+# Utilities
+tqdm>=4.64.0
+pydantic>=1.10.0
+tenacity>=8.0.0
+gradio>=4.0.0
+python-dotenv>=1.0.0
+
+# DashScope for Aliyun API
+dashscope>=1.0.0

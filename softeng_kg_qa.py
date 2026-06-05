@@ -22,7 +22,6 @@ from dotenv import load_dotenv
 import pypdf
 import numpy as np
 from langchain_core.embeddings import Embeddings
-from langchain_classic.chains import LLMChain
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document as LangchainDocument
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -39,7 +38,18 @@ from core import (
 from models import Entity, QuestionInput, AnswerOutput, SearchResult, FileUploadResult
 
 # 导入原始模块中需要的部分
-from agents import AgentCoordinator
+# 使用 importlib 来避免与 agents 目录冲突
+import importlib.util
+import os
+current_file_dir = os.path.dirname(os.path.abspath(__file__))
+agents_py_path = os.path.join(current_file_dir, 'agents.py')
+spec = importlib.util.spec_from_file_location('agents_module', agents_py_path)
+agents_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(agents_module)
+
+# 从 agents 模块导入需要的类
+AgentCoordinator = getattr(agents_module, 'AgentCoordinator')
+
 from config import get_log_config
 from utils import setup_logger
 from utils.formatters import format_search_results_as_html as format_doc_results_html
@@ -584,13 +594,90 @@ class Neo4jHandler:
 
 
 class EntityExtractor:
-    """从用户问题中提取实体"""
+    """从用户问题中提取实体 - 优化版本，支持关键词匹配和 LLM 两种方式"""
 
     def __init__(self, llm, error_handler: ErrorHandler = None):
         self.llm = llm
         self.error_handler = error_handler or ErrorHandler(logger)
+        # 预定义关键词到实体的映射（快速匹配）
+        self.keyword_map = {
+            "UML": {"name": "UML", "type": "模型"},
+            "uml": {"name": "UML", "type": "模型"},
+            "统一建模语言": {"name": "UML", "type": "模型"},
+            "UML图": {"name": "UML", "type": "模型"},
+            "类图": {"name": "类图", "type": "模型"},
+            "用例图": {"name": "用例图", "type": "模型"},
+            "时序图": {"name": "时序图", "type": "模型"},
+            "活动图": {"name": "活动图", "type": "模型"},
+            "状态图": {"name": "状态图", "type": "模型"},
+            "组件图": {"name": "组件图", "type": "模型"},
+            "部署图": {"name": "部署图", "type": "模型"},
+            "包图": {"name": "包图", "type": "模型"},
+            "对象图": {"name": "对象图", "type": "模型"},
+            "协作图": {"name": "协作图", "type": "模型"},
+            "敏捷开发": {"name": "敏捷开发", "type": "方法"},
+            "Scrum": {"name": "Scrum", "type": "方法"},
+            "瀑布模型": {"name": "瀑布模型", "type": "模型"},
+            "设计模式": {"name": "设计模式", "type": "概念"},
+            "单例模式": {"name": "单例模式", "type": "模式"},
+            "工厂模式": {"name": "工厂模式", "type": "模式"},
+            "观察者模式": {"name": "观察者模式", "type": "模式"},
+            "策略模式": {"name": "策略模式", "type": "模式"},
+            "适配器模式": {"name": "适配器模式", "type": "模式"},
+            "装饰器模式": {"name": "装饰器模式", "type": "模式"},
+            "单元测试": {"name": "单元测试", "type": "方法"},
+            "集成测试": {"name": "集成测试", "type": "方法"},
+            "系统测试": {"name": "系统测试", "type": "方法"},
+            "验收测试": {"name": "验收测试", "type": "方法"},
+            "回归测试": {"name": "回归测试", "type": "方法"},
+            "函数式编程": {"name": "函数式编程", "type": "范式"},
+            "面向对象": {"name": "面向对象编程", "type": "范式"},
+            "面向对象编程": {"name": "面向对象编程", "type": "范式"},
+            "微服务": {"name": "微服务架构", "type": "架构"},
+            "微服务架构": {"name": "微服务架构", "type": "架构"},
+            "MVC": {"name": "MVC", "type": "架构"},
+            "分层架构": {"name": "分层架构", "type": "架构"},
+            "事件驱动": {"name": "事件驱动架构", "type": "架构"},
+            "SOLID": {"name": "SOLID原则", "type": "原则"},
+            "单一职责": {"name": "单一职责原则", "type": "原则"},
+            "开闭原则": {"name": "开闭原则", "type": "原则"},
+            "里氏替换": {"name": "里氏替换原则", "type": "原则"},
+            "接口隔离": {"name": "接口隔离原则", "type": "原则"},
+            "依赖倒置": {"name": "依赖倒置原则", "type": "原则"},
+        }
 
     def extract_entities(self, question: str) -> List[Dict[str, str]]:
+        """提取实体 - 先尝试关键词快速匹配，失败则使用 LLM"""
+        # 1. 先尝试关键词快速匹配
+        quick_entities = self._quick_keyword_match(question)
+        if quick_entities:
+            logger.debug(f"快速匹配到实体: {quick_entities}")
+            return quick_entities
+        
+        # 2. 关键词匹配失败，使用 LLM
+        return self._extract_entities_with_llm(question)
+    
+    def _quick_keyword_match(self, question: str) -> List[Dict[str, str]]:
+        """使用关键词快速匹配"""
+        matched = []
+        lower_question = question.lower()
+        
+        for keyword, entity in self.keyword_map.items():
+            if keyword.lower() in lower_question:
+                matched.append(entity)
+        
+        # 去重
+        unique_entities = []
+        seen = set()
+        for e in matched:
+            key = (e["name"], e["type"])
+            if key not in seen:
+                seen.add(key)
+                unique_entities.append(e)
+        
+        return unique_entities
+
+    def _extract_entities_with_llm(self, question: str) -> List[Dict[str, str]]:
         """使用LLM从问题中提取实体"""
         prompt_template = PromptTemplate(
             template="""
@@ -604,12 +691,13 @@ class EntityExtractor:
         )
 
         try:
-            chain = LLMChain(llm=self.llm, prompt=prompt_template)
+            # 使用新的 RunnableSequence 方式代替已弃用的 LLMChain
+            chain = prompt_template | self.llm
             response = chain.invoke({
                 "question": question,
                 "entity_types": ", ".join(ENTITY_TYPES)
             })
-            content = response["text"].strip()
+            content = response.content if hasattr(response, 'content') else str(response)
             
             entities = []
             try:
@@ -627,7 +715,7 @@ class EntityExtractor:
                 if isinstance(item, dict) and "name" in item and "type" in item and item["type"] in ENTITY_TYPES:
                     valid_entities.append({"name": str(item["name"]), "type": str(item["type"])})
             
-            logger.debug(f"提取的实体: {valid_entities}")
+            logger.debug(f"LLM 提取的实体: {valid_entities}")
             return valid_entities
         except Exception as e:
             error_ctx = ErrorContext(
@@ -947,6 +1035,11 @@ class SoftwareEngineeringQASystem:
         self.current_agent_name = None
         self.conversation_history = deque(maxlen=self.config.max_conversation_history)
         
+        # 问题响应缓存 - 提高重复问题的响应速度
+        from collections import OrderedDict
+        self.response_cache = OrderedDict()
+        self.max_cache_size = 100  # 最多缓存100个问题
+        
         logger.info("SoftwareEngineeringQASystem 初始化成功。")
 
     def _setup_llm(self):
@@ -1018,15 +1111,32 @@ class SoftwareEngineeringQASystem:
                     def __init__(self, api_key: str, model: str):
                         self.api_key = api_key
                         self.model = model
+                        self.dimension = None
+                        # 根据模型确定合适的维度
+                        if model in ['text-embedding-v3', 'text-embedding-v4']:
+                            self.dimension = 1024  # 使用支持的维度
                         import dashscope
                         dashscope.api_key = api_key
                     
                     def embed_documents(self, texts: List[str]) -> List[List[float]]:
                         import dashscope
                         results = []
+                        # 逐个处理文本，避免 batch 处理的问题
                         for text in texts:
                             try:
-                                resp = dashscope.TextEmbedding.call(model=self.model, input=text)
+                                # 确保文本是字符串
+                                if not isinstance(text, str):
+                                    text = str(text)
+                                if not text or not text.strip():
+                                    # 空文本返回零向量
+                                    results.append([0.0] * 1024)
+                                    continue
+                                
+                                resp = dashscope.TextEmbedding.call(
+                                    model=self.model, 
+                                    input=text,
+                                    dimension=self.dimension
+                                )
                                 if resp.status_code == 200:
                                     results.append(resp.output['embeddings'][0]['embedding'])
                                 elif resp.status_code == 403 and hasattr(resp, 'code') and resp.code == 'AllocationQuota.FreeTierOnly':
@@ -1036,7 +1146,9 @@ class SoftwareEngineeringQASystem:
                             except Exception as e:
                                 if "FreeTierOnly" in str(e):
                                     raise e
-                                raise Exception(f"调用嵌入 API 时出错: {str(e)}")
+                                logger.error(f"调用嵌入 API 时出错: {str(e)}, 文本: {text}")
+                                # 出错时返回零向量
+                                results.append([0.0] * 1024)
                         return results
                     
                     def embed_query(self, text: str) -> List[float]:
@@ -1113,6 +1225,35 @@ class SoftwareEngineeringQASystem:
         logger.info("===== 回答问题 =====")
         logger.info(f"问题: {question}")
         
+        # 检查缓存
+        cache_key = question.strip().lower()
+        if cache_key in self.response_cache:
+            logger.info(f"从缓存中获取答案，命中缓存: {question}")
+            cached_data = self.response_cache[cache_key]
+            # 移动到缓存末尾，标记为最近使用
+            self.response_cache.move_to_end(cache_key)
+            
+            # 更新对话历史
+            self.conversation_history.append((question, cached_data["answer"]))
+            self.current_agent_name = cached_data["agent_name"]
+            self.current_kg_context = cached_data["kg_context"]
+            self.current_doc_results_raw = cached_data["doc_results"]
+            
+            # 构建响应，添加缓存标记
+            result = {
+                "answer": cached_data["answer"],
+                "agent_name": cached_data["agent_name"],
+                "conversation_history": list(self.conversation_history),
+                "performance": {
+                    "total": f"{time.time() - start_time:.3f}s (缓存)",
+                    "from_cache": True
+                }
+            }
+            
+            logger.info(f"===== 缓存答案返回 (由 {self.current_agent_name} 提供，耗时 {time.time() - start_time:.3f}s) =====")
+            return result
+        
+        # 缓存未命中，正常处理
         self.current_kg_context = {"entities": [], "paths": []}
         self.current_doc_results_raw = []
         self.current_agent_name = None
@@ -1205,6 +1346,18 @@ class SoftwareEngineeringQASystem:
         
         # 更新对话历史
         self.conversation_history.append((question, final_answer))
+        
+        # 缓存结果
+        self.response_cache[cache_key] = {
+            "answer": final_answer,
+            "agent_name": self.current_agent_name,
+            "kg_context": self.current_kg_context,
+            "doc_results": self.current_doc_results_raw.copy()
+        }
+        
+        # 限制缓存大小
+        if len(self.response_cache) > self.max_cache_size:
+            self.response_cache.popitem(last=False)  # 删除最旧的
         
         logger.info(f"===== 答案生成完成 (由 {self.current_agent_name} 提供，耗时 {final_metrics.total_time:.3f}s) =====")
         

@@ -4,7 +4,6 @@ import logging
 import re
 from typing import List, Dict, Any, Tuple, Optional
 
-from langchain_classic.chains import LLMChain
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import Tool
@@ -115,11 +114,10 @@ class Agent:
         
         # 使用LangChain链生成回答
         try:
-            chain = LLMChain(
-                llm=self.llm,
-                prompt=prompt_template
-            )
-            return chain.invoke(prompt_vars)["text"]
+            # 使用新的 RunnableSequence 方式代替已弃用的 LLMChain
+            chain = prompt_template | self.llm
+            response = chain.invoke(prompt_vars)
+            return response.content if hasattr(response, 'content') else str(response)
         except Exception as e:
             logger.error(f"{self.name}调用LLM时出错: {e}")
             return f"抱歉，在生成回答时遇到了问题：{e}。"
@@ -601,13 +599,24 @@ def synthesize_answers_function(answers_json: str, query: str, llm: ChatOpenAI) 
 
 
 class AgentCoordinator:
-    """智能体协调器，使用LLM选择多个智能体来协作处理问题"""
+    """智能体协调器，使用关键词匹配快速选择智能体"""
     
     def __init__(self, llm: ChatOpenAI):
         self.llm = llm
         self.agents = []
         self._initialize_agents()
         
+        # 关键词到智能体的映射 - 快速匹配
+        self.keyword_to_agent = {
+            "概念解释智能体": ["概念", "定义", "解释", "是什么", "什么是", "UML", "模型", "范式", "原则", "标准"],
+            "软件设计智能体": ["设计", "架构", "模式", "类图", "用例图", "时序图", "活动图", "UML图"],
+            "需求分析智能体": ["需求", "分析", "规格", "需求获取", "需求工程"],
+            "软件测试智能体": ["测试", "质量", "单元测试", "集成测试", "测试用例"],
+            "项目管理智能体": ["项目", "管理", "敏捷", "Scrum", "瀑布", "生命周期"],
+            "代码实现智能体": ["代码", "实现", "算法", "编程", "示例"],
+            "软件伦理智能体": ["伦理", "道德", "社会", "责任", "隐私"]
+        }
+    
     def _initialize_agents(self):
         """创建并注册所有智能体"""
         self.agents = [
@@ -629,34 +638,51 @@ class AgentCoordinator:
         return None
     
     def select_agents(self, question: str, entities: List[Dict[str, str]]) -> List[Tuple[Agent, float]]:
-        """使用LLM评估并选择合适的智能体处理问题"""
-        selection_json = select_agents_function(question, entities, self.llm, self.agents)
+        """使用关键词匹配快速选择合适的智能体"""
+        question_lower = question.lower()
         
-        try:
-            selected_data = json.loads(selection_json)
-            selected_agents = []
+        # 收集实体关键词
+        entity_keywords = [entity.get("name", "").lower() for entity in entities if entity.get("name")]
+        
+        agent_scores = {}
+        
+        # 遍历所有智能体，计算匹配分数
+        for agent in self.agents:
+            score = 0.0
+            keywords = self.keyword_to_agent.get(agent.name, [])
             
-            for item in selected_data:
-                agent_name = item.get("agent")
-                relevance = item.get("relevance", 0.0)
-                agent = self.get_agent_by_name(agent_name)
-                
-                if agent and relevance >= 0.5:
-                    selected_agents.append((agent, relevance))
+            # 检查问题中的关键词匹配
+            for keyword in keywords:
+                if keyword.lower() in question_lower:
+                    score += 0.3
             
-            # 如果没有选择任何智能体，选择概念解释智能体
-            if not selected_agents:
-                default_agent = self.get_agent_by_name("概念解释智能体") or self.agents[0]
-                selected_agents.append((default_agent, 1.0))
+            # 检查实体关键词匹配
+            for entity_keyword in entity_keywords:
+                for keyword in keywords:
+                    if keyword.lower() in entity_keyword:
+                        score += 0.2
             
-            # 按相关性排序
-            selected_agents.sort(key=lambda x: x[1], reverse=True)
-            return selected_agents
-            
-        except Exception as e:
-            logger.error(f"解析智能体选择结果时出错: {e}")
-            # 出错时选择第一个智能体（概念解释智能体）
-            return [(self.agents[0], 1.0)]
+            agent_scores[agent] = score
+        
+        # 选择分数最高的智能体
+        sorted_agents = sorted(agent_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # 获取有分数的智能体，或默认使用概念解释智能体
+        selected_agents = []
+        for agent, score in sorted_agents:
+            if score > 0:
+                selected_agents.append((agent, score))
+        
+        # 如果没有匹配到，使用默认智能体
+        if not selected_agents:
+            default_agent = self.get_agent_by_name("概念解释智能体") or self.agents[0]
+            selected_agents.append((default_agent, 1.0))
+        
+        # 限制最多选择2个智能体，避免过多LLM调用
+        selected_agents = selected_agents[:2]
+        
+        logger.debug(f"智能体选择结果: {[(a.name, s) for a, s in selected_agents]}")
+        return selected_agents
     
     def process_question(self, question: str, kg_context: Dict[str, Any], 
                          entities: List[Dict[str, str]], doc_results: List[Dict[str, Any]],
