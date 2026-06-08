@@ -1061,7 +1061,9 @@ class SoftwareEngineeringQASystem:
                 llm = ChatTongyi(
                     api_key=self.config.llm.api_key,
                     temperature=self.config.llm.temperature,
-                    model=self.config.llm.model
+                    model=self.config.llm.model,
+                    request_timeout=self.config.llm.timeout,
+                    max_retries=self.config.llm.max_retries
                 )
                 logger.info("Langchain ChatTongyi 设置成功。")
             except Exception:
@@ -1069,7 +1071,9 @@ class SoftwareEngineeringQASystem:
                     api_key=self.config.llm.api_key,
                     base_url=self.config.llm.base_url,
                     temperature=self.config.llm.temperature,
-                    model=self.config.llm.model
+                    model=self.config.llm.model,
+                    request_timeout=self.config.llm.timeout,
+                    max_retries=self.config.llm.max_retries
                 )
                 logger.info("Langchain ChatOpenAI (兼容模式) 设置成功。")
             
@@ -1219,27 +1223,28 @@ class SoftwareEngineeringQASystem:
             self.response_generator = ResponseGenerator(self.llm, error_handler=self.error_handler)
             self.agent_coordinator = AgentCoordinator(self.llm)
 
-    def answer_question(self, question: str) -> dict:
+    def answer_question(self, question: str, web_search: bool = False, 
+                       table_output: bool = False, multi_hop: bool = False) -> dict:
         """处理问题，整合 KG 和 RAG 生成答案"""
         start_time = time.time()
         logger.info("===== 回答问题 =====")
         logger.info(f"问题: {question}")
+        logger.info(f"参数: web_search={web_search}, table_output={table_output}, multi_hop={multi_hop}")
+        
+        # 构建带参数的缓存键
+        cache_key = f"{question.strip().lower()}|{web_search}|{table_output}|{multi_hop}"
         
         # 检查缓存
-        cache_key = question.strip().lower()
         if cache_key in self.response_cache:
             logger.info(f"从缓存中获取答案，命中缓存: {question}")
             cached_data = self.response_cache[cache_key]
-            # 移动到缓存末尾，标记为最近使用
             self.response_cache.move_to_end(cache_key)
             
-            # 更新对话历史
             self.conversation_history.append((question, cached_data["answer"]))
             self.current_agent_name = cached_data["agent_name"]
             self.current_kg_context = cached_data["kg_context"]
             self.current_doc_results_raw = cached_data["doc_results"]
             
-            # 构建响应，添加缓存标记
             result = {
                 "answer": cached_data["answer"],
                 "agent_name": cached_data["agent_name"],
@@ -1269,41 +1274,107 @@ class SoftwareEngineeringQASystem:
                 if self.entity_extractor:
                     entities = self.entity_extractor.extract_entities(question)
             
-            # 2. 匹配实体并构建 KG 上下文
-            all_matched_kg_entity_names = set()
-            with perf_ctx.measure("实体匹配"):
-                if entities and self.entity_matcher and self.neo4j_handler:
-                    for entity in entities:
-                        entity_name = entity.get("name")
-                        if not entity_name:
-                            continue
+            # 2. 并行执行 KG 查询和 RAG 搜索
+            import concurrent.futures
+            kg_future = None
+            rag_future = None
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                # 提交 KG 相关任务
+                def process_kg():
+                    kg_result = {"entities": [], "paths": [], "matched_names": set()}
+                    if entities and self.entity_matcher and self.neo4j_handler:
+                        for entity in entities:
+                            entity_name = entity.get("name")
+                            if not entity_name:
+                                continue
+                            
+                            matches = self.entity_matcher.match_entity(entity)
+                            if matches:
+                                top_match = matches[0]
+                                kg_entity_name = top_match["entity"]["name"]
+                                try:
+                                    entity_data = self.neo4j_handler.get_entity_relationships(kg_entity_name)
+                                    if entity_data:
+                                        kg_result["entities"].append(entity_data)
+                                        kg_result["matched_names"].add(kg_entity_name)
+                                except Exception as e:
+                                    logger.debug(f"获取实体关系失败 {kg_entity_name}: {e}")
+                    
+                    # 多跳推理
+                    if multi_hop and len(kg_result["matched_names"]) > 0 and self.neo4j_handler:
+                        logger.info("执行多跳推理...")
+                        extended_entities = set(kg_result["matched_names"])
                         
-                        matches = self.entity_matcher.match_entity(entity)
-                        if matches:
-                            top_match = matches[0]
-                            kg_entity_name = top_match["entity"]["name"]
-                            entity_data = self.neo4j_handler.get_entity_relationships(kg_entity_name)
-                            if entity_data:
-                                self.current_kg_context["entities"].append(entity_data)
-                                all_matched_kg_entity_names.add(kg_entity_name)
+                        for _ in range(2):
+                            new_entities = set()
+                            for entity_name in extended_entities:
+                                try:
+                                    entity_data = self.neo4j_handler.get_entity_relationships(entity_name)
+                                    if entity_data:
+                                        relationships = entity_data.get("relationships", [])
+                                        for rel in relationships:
+                                            if rel.get("target"):
+                                                new_entities.add(rel["target"])
+                                except Exception as e:
+                                    logger.debug(f"多跳查询失败 {entity_name}: {e}")
+                        
+                        for new_entity in new_entities:
+                            if new_entity not in extended_entities:
+                                extended_entities.add(new_entity)
+                                try:
+                                    entity_data = self.neo4j_handler.get_entity_relationships(new_entity)
+                                    if entity_data and entity_data not in kg_result["entities"]:
+                                        kg_result["entities"].append(entity_data)
+                                except Exception as e:
+                                    logger.debug(f"多跳扩展失败 {new_entity}: {e}")
+                    
+                    # 实体路径查询
+                    if len(kg_result["matched_names"]) > 1 and self.neo4j_handler:
+                        entity_list = list(kg_result["matched_names"])
+                        for i in range(len(entity_list)):
+                            for j in range(i + 1, len(entity_list)):
+                                source, target = entity_list[i], entity_list[j]
+                                try:
+                                    paths = self.neo4j_handler.get_path_between_entities(source, target)
+                                    if paths:
+                                        kg_result["paths"].extend(paths)
+                                except Exception as e:
+                                    logger.debug(f"路径查询失败 {source} -> {target}: {e}")
+                    
+                    return kg_result
+                
+                # 提交 RAG 搜索任务
+                def process_rag():
+                    if self.rag_manager:
+                        return self.rag_manager.search_documents(question)
+                    return []
+                
+                kg_future = executor.submit(process_kg)
+                rag_future = executor.submit(process_rag)
+                
+                # 等待结果
+                with perf_ctx.measure("KG检索"):
+                    kg_result = kg_future.result(timeout=30)  # KG查询超时30秒
+                
+                with perf_ctx.measure("RAG搜索"):
+                    self.current_doc_results_raw = rag_future.result(timeout=30)  # RAG搜索超时30秒
+                
+                self.current_kg_context["entities"] = kg_result["entities"]
+                self.current_kg_context["paths"] = kg_result["paths"]
+                all_matched_kg_entity_names = kg_result["matched_names"]
             
-            # 3. 查找实体之间的路径
-            with perf_ctx.measure("KG检索"):
-                if len(all_matched_kg_entity_names) > 1 and self.neo4j_handler:
-                    entity_list = list(all_matched_kg_entity_names)
-                    for i in range(len(entity_list)):
-                        for j in range(i + 1, len(entity_list)):
-                            source, target = entity_list[i], entity_list[j]
-                            paths = self.neo4j_handler.get_path_between_entities(source, target)
-                            if paths:
-                                self.current_kg_context["paths"].extend(paths)
+            # 3. 联网搜索（可选）
+            web_search_results = []
+            if web_search:
+                with perf_ctx.measure("联网搜索"):
+                    try:
+                        web_search_results = self._perform_web_search(question)
+                        logger.info(f"联网搜索完成，获取 {len(web_search_results)} 条结果")
+                    except Exception as e:
+                        logger.warning(f"联网搜索失败: {e}")
             
-            # 4. 文档检索
-            with perf_ctx.measure("RAG搜索"):
-                if self.rag_manager:
-                    self.current_doc_results_raw = self.rag_manager.search_documents(question)
-            
-            # 5. 使用智能体协调器生成最终响应
+            # 4. 使用智能体协调器生成最终响应
             with perf_ctx.measure("智能体选择"):
                 has_kg = bool(self.current_kg_context.get("entities") or self.current_kg_context.get("paths"))
                 has_docs = bool(self.current_doc_results_raw)
@@ -1318,7 +1389,9 @@ class SoftwareEngineeringQASystem:
                             kg_context=self.current_kg_context,
                             entities=entities,
                             doc_results=self.current_doc_results_raw,
-                            conversation_history=list(self.conversation_history)
+                            conversation_history=list(self.conversation_history),
+                            web_search_results=web_search_results,
+                            table_output=table_output
                         )
                         self.current_agent_name = agent_name
                 else:
@@ -1367,6 +1440,53 @@ class SoftwareEngineeringQASystem:
             "conversation_history": list(self.conversation_history),
             "performance": final_metrics.to_dict()
         }
+
+    def _perform_web_search(self, query: str) -> List[Dict[str, str]]:
+        """执行联网搜索获取最新信息"""
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            
+            # 使用 DuckDuckGo 搜索 API
+            search_url = "https://html.duckduckgo.com/html/"
+            params = {"q": query, "kl": "zh-CN"}
+            
+            # 添加浏览器请求头以避免被识别为自动化请求
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Referer": "https://duckduckgo.com/",
+            }
+            
+            response = requests.get(search_url, params=params, headers=headers, timeout=15)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            results = []
+            
+            # 解析搜索结果（尝试多种可能的class名称）
+            for result in soup.find_all('div', class_='result'):
+                title_tag = result.find('a', class_='result__a')
+                url_tag = result.find('a', class_='result__url')
+                snippet_tag = result.find('span', class_='result__snippet')
+                
+                if title_tag and url_tag:
+                    results.append({
+                        "title": title_tag.get_text(strip=True),
+                        "url": url_tag['href'] if url_tag.has_attr('href') else url_tag.get_text(strip=True),
+                        "snippet": snippet_tag.get_text(strip=True) if snippet_tag else ""
+                    })
+                
+                if len(results) >= 5:
+                    break
+            
+            return results
+        except Exception as e:
+            logger.error(f"联网搜索失败: {e}")
+            return []
 
     def _generate_fallback_response(self, question: str, reason: str) -> str:
         """生成基于通用知识的回退响应"""

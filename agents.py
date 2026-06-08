@@ -83,7 +83,9 @@ class Agent:
     
     def process(self, question: str, kg_context: Dict[str, Any], 
                 entities: List[Dict[str, str]], doc_results: List[Dict[str, Any]],
-                conversation_history: List[Tuple[str, str]] = None) -> str:
+                conversation_history: List[Tuple[str, str]] = None,
+                web_search_results: List[Dict[str, str]] = None,
+                table_output: bool = False) -> str:
         """
         处理问题并生成响应，支持对话历史
         
@@ -93,15 +95,18 @@ class Agent:
             entities: 提取的实体
             doc_results: 文档检索结果
             conversation_history: 对话历史（用户问题，系统回答）对列表
+            web_search_results: 联网搜索结果
+            table_output: 是否需要表格输出
         """
         # 准备上下文
         kg_context_str = self._format_kg_context(kg_context)
         doc_context_str = self._format_doc_context(doc_results)
+        web_search_str = self._format_web_search_results(web_search_results)
         entities_str = json.dumps(entities, ensure_ascii=False, indent=2)
         history_str = self._format_conversation_history(conversation_history)
         
         # 设置提示模板
-        prompt_template = self._get_prompt_template()
+        prompt_template = self._get_prompt_template(table_output)
         
         # 提供所有必需的变量
         prompt_vars = {
@@ -109,34 +114,90 @@ class Agent:
             "entities": entities_str,
             "kg_context": kg_context_str or "无相关知识图谱信息。",
             "doc_context": doc_context_str or "无相关文档片段。",
+            "web_search": web_search_str or "无联网搜索结果。",
             "history": history_str or "这是新的对话"
         }
         
         # 使用LangChain链生成回答
         try:
-            # 使用新的 RunnableSequence 方式代替已弃用的 LLMChain
             chain = prompt_template | self.llm
             response = chain.invoke(prompt_vars)
-            return response.content if hasattr(response, 'content') else str(response)
+            answer = response.content if hasattr(response, 'content') else str(response)
+            
+            # 如果需要表格输出，尝试格式化
+            if table_output:
+                answer = self._format_answer_as_table(answer)
+            
+            return answer
         except Exception as e:
             logger.error(f"{self.name}调用LLM时出错: {e}")
             return f"抱歉，在生成回答时遇到了问题：{e}。"
     
-    def _get_prompt_template(self) -> PromptTemplate:
-        """获取提示模板 - 子类可以重写以提供自定义模板"""
-        template = """
-        任务：作为软件工程课程助手，根据【知识图谱信息】、【相关文档片段】和【对话历史】回答【用户问题】。
-        【当前问题】: {question}
-        【提取实体】: {entities}
-        【知识图谱信息】: {kg_context}
-        【相关文档片段】: {doc_context}
-        【对话历史】: {history}
+    def _format_web_search_results(self, web_search_results: List[Dict[str, str]]) -> str:
+        """格式化联网搜索结果"""
+        if not web_search_results:
+            return ""
         
+        formatted_results = []
+        for i, result in enumerate(web_search_results, 1):
+            title = result.get("title", "")
+            url = result.get("url", "")
+            snippet = result.get("snippet", "")
+            
+            if title:
+                formatted = f"{i}. [{title}]({url})"
+                if snippet:
+                    formatted += f"\n   {snippet}"
+                formatted_results.append(formatted)
+        
+        return "\n".join(formatted_results)
+    
+    def _format_answer_as_table(self, answer: str) -> str:
+        """尝试将答案格式化为表格形式"""
+        try:
+            import re
+            
+            lines = answer.split('\n')
+            table_rows = []
+            
+            for line in lines:
+                match = re.match(r'^\s*\d+[\.\、]\s*(.*)', line)
+                if match:
+                    table_rows.append(match.group(1))
+            
+            if len(table_rows) >= 2:
+                table_html = "<table style='width:100%; border-collapse:collapse; margin:10px 0;'>"
+                table_html += "<thead><tr><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>序号</th><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>内容</th></tr></thead>"
+                table_html += "<tbody>"
+                for i, row in enumerate(table_rows, 1):
+                    table_html += f"<tr><td style='border:1px solid #ddd; padding:8px;'>{i}</td><td style='border:1px solid #ddd; padding:8px;'>{row}</td></tr>"
+                table_html += "</tbody></table>"
+                return table_html
+            
+            return answer
+        except Exception as e:
+            logger.error(f"表格格式化失败: {e}")
+            return answer
+    
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
+        """获取提示模板 - 子类可以重写以提供自定义模板"""
+        output_format = "请以清晰的表格形式输出回答，使用列表或表格展示。" if table_output else ""
+        
+        template = f"""
+        任务：作为软件工程课程助手，根据【知识图谱信息】、【相关文档片段】、【联网搜索结果】和【对话历史】回答【用户问题】。
+        【当前问题】: {{question}}
+        【提取实体】: {{entities}}
+        【知识图谱信息】: {{kg_context}}
+        【相关文档片段】: {{doc_context}}
+        【联网搜索结果】: {{web_search}}
+        【对话历史】: {{history}}
+        
+        {output_format}
         请生成回答:
         """
         return PromptTemplate(
             template=template,
-            input_variables=["question", "entities", "kg_context", "doc_context", "history"]
+            input_variables=["question", "entities", "kg_context", "doc_context", "web_search", "history"]
         )
     
     def _format_kg_context(self, kg_context: Dict[str, Any]) -> str:
@@ -230,7 +291,7 @@ class ConceptExplanationAgent(Agent):
     def __init__(self, llm: ChatOpenAI):
         self._init_from_config(llm)
     
-    def _get_prompt_template(self) -> PromptTemplate:
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
         template = """
         任务：作为软件工程课程助手的概念解释专家，根据【知识图谱信息】、【相关文档片段】和【对话历史】解释【用户问题】中的软件工程概念。
         【当前问题】: {question}
@@ -262,7 +323,7 @@ class RequirementsAnalysisAgent(Agent):
     def __init__(self, llm: ChatOpenAI):
         self._init_from_config(llm)
     
-    def _get_prompt_template(self) -> PromptTemplate:
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
         template = """
         任务：作为软件工程课程助手的需求分析专家，根据【知识图谱信息】、【相关文档片段】和【对话历史】回答【用户问题】中关于需求工程的问题。
         【当前问题】: {question}
@@ -294,7 +355,7 @@ class SoftwareDesignAgent(Agent):
     def __init__(self, llm: ChatOpenAI):
         self._init_from_config(llm)
     
-    def _get_prompt_template(self) -> PromptTemplate:
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
         template = """
         任务：作为软件工程课程助手的软件设计专家，根据【知识图谱信息】、【相关文档片段】和【对话历史】回答【用户问题】中关于软件设计和架构的问题。
         【当前问题】: {question}
@@ -326,7 +387,7 @@ class SoftwareTestingAgent(Agent):
     def __init__(self, llm: ChatOpenAI):
         self._init_from_config(llm)
     
-    def _get_prompt_template(self) -> PromptTemplate:
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
         template = """
         任务：作为软件工程课程助手的软件测试专家，根据【知识图谱信息】、【相关文档片段】和【对话历史】回答【用户问题】中关于软件测试和质量保证的问题。
         【当前问题】: {question}
@@ -358,7 +419,7 @@ class ProjectManagementAgent(Agent):
     def __init__(self, llm: ChatOpenAI):
         self._init_from_config(llm)
     
-    def _get_prompt_template(self) -> PromptTemplate:
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
         template = """
         任务：作为软件工程课程助手的项目管理专家，根据【知识图谱信息】、【相关文档片段】和【对话历史】回答【用户问题】中关于软件项目管理的问题。
         【当前问题】: {question}
@@ -390,7 +451,7 @@ class CodeImplementationAgent(Agent):
     def __init__(self, llm: ChatOpenAI):
         self._init_from_config(llm)
     
-    def _get_prompt_template(self) -> PromptTemplate:
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
         template = """
         任务：作为软件工程课程助手的代码实现专家，根据【知识图谱信息】、【相关文档片段】和【对话历史】回答【用户问题】中关于代码实现和编程实践的问题。
         【当前问题】: {question}
@@ -422,7 +483,7 @@ class SoftwareEthicsAgent(Agent):
     def __init__(self, llm: ChatOpenAI):
         self._init_from_config(llm)
     
-    def _get_prompt_template(self) -> PromptTemplate:
+    def _get_prompt_template(self, table_output: bool = False) -> PromptTemplate:
         template = """
         任务：作为软件工程课程助手的软件伦理专家，根据【知识图谱信息】、【相关文档片段】和【对话历史】回答【用户问题】中关于软件伦理和职业道德的问题。
         【当前问题】: {question}
@@ -686,10 +747,16 @@ class AgentCoordinator:
     
     def process_question(self, question: str, kg_context: Dict[str, Any], 
                          entities: List[Dict[str, str]], doc_results: List[Dict[str, Any]],
-                         conversation_history: List[Tuple[str, str]] = None) -> Tuple[str, str]:
+                         conversation_history: List[Tuple[str, str]] = None,
+                         web_search_results: List[Dict[str, str]] = None,
+                         table_output: bool = False) -> Tuple[str, str]:
         """
         处理问题，使用多个智能体
         返回: (回答, 智能体名称)
+        
+        参数:
+            web_search_results: 联网搜索结果
+            table_output: 是否需要表格输出
         """
         try:
             # 选择智能体
@@ -699,7 +766,8 @@ class AgentCoordinator:
             if len(selected_agents) == 1:
                 # 单个智能体处理
                 agent, relevance = selected_agents[0]
-                answer = agent.process(question, kg_context, entities, doc_results, conversation_history)
+                answer = agent.process(question, kg_context, entities, doc_results, conversation_history,
+                                      web_search_results=web_search_results, table_output=table_output)
                 agent_names = agent.name
                 return answer, agent_names
             
@@ -707,7 +775,8 @@ class AgentCoordinator:
             answers_data = []
             for agent, relevance in selected_agents:
                 logger.info(f"智能体 {agent.name} 正在处理问题 (相关性: {relevance:.2f})...")
-                answer = agent.process(question, kg_context, entities, doc_results, conversation_history)
+                answer = agent.process(question, kg_context, entities, doc_results, conversation_history,
+                                      web_search_results=web_search_results, table_output=table_output)
                 answers_data.append({
                     "agent": agent.name,
                     "relevance": relevance,
@@ -717,6 +786,10 @@ class AgentCoordinator:
             # 合成答案
             answers_json = json.dumps(answers_data, ensure_ascii=False)
             final_answer = synthesize_answers_function(answers_json, question, self.llm)
+            
+            # 如果需要表格输出，尝试格式化
+            if table_output:
+                final_answer = self._format_as_table(final_answer)
             
             # 创建联合智能体名称
             primary_agent = selected_agents[0][0].name
@@ -735,3 +808,30 @@ class AgentCoordinator:
             fallback_agent = self.get_agent_by_name("概念解释智能体") or self.agents[0]
             fallback_answer = fallback_agent.process(question, kg_context, entities, doc_results, conversation_history)
             return fallback_answer, f"{fallback_agent.name} (应急方案)"
+    
+    def _format_as_table(self, answer: str) -> str:
+        """尝试将答案格式化为表格形式"""
+        try:
+            import re
+            
+            lines = answer.split('\n')
+            table_rows = []
+            
+            for line in lines:
+                match = re.match(r'^\s*\d+[\.\、]\s*(.*)', line)
+                if match:
+                    table_rows.append(match.group(1))
+            
+            if len(table_rows) >= 2:
+                table_html = "<table style='width:100%; border-collapse:collapse; margin:10px 0;'>"
+                table_html += "<thead><tr><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>序号</th><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>内容</th></tr></thead>"
+                table_html += "<tbody>"
+                for i, row in enumerate(table_rows, 1):
+                    table_html += f"<tr><td style='border:1px solid #ddd; padding:8px;'>{i}</td><td style='border:1px solid #ddd; padding:8px;'>{row}</td></tr>"
+                table_html += "</tbody></table>"
+                return table_html
+            
+            return answer
+        except Exception as e:
+            logger.error(f"表格格式化失败: {e}")
+            return answer

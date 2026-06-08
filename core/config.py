@@ -30,7 +30,8 @@ class LLMConfig:
     model: str = "qwen-plus"
     temperature: float = 0.5
     max_tokens: int = 2048
-    timeout: int = 30
+    timeout: int = 60  # 增加超时时间到60秒
+    max_retries: int = 1  # 减少重试次数
 
 
 @dataclass

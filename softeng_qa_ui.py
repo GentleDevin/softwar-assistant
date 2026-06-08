@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-import logging
-import os
 import time
 import traceback
-from typing import List, Dict, Any, Tuple
+from typing import List
 
 import gradio as gr
 
@@ -12,7 +10,6 @@ from softeng_kg_qa import (
     initialize_qa_system,  # 导入初始化函数
     get_qa_system_instance,  # 导入获取实例函数
     process_uploaded_files,  # 导入处理文件函数
-    # 导入独立的文档搜索函数 (给Tab用)
 )
 
 # 导入统一配置模块和格式化工具
@@ -31,8 +28,6 @@ NEO4J_USERNAME = neo4j_config.username
 NEO4J_PASSWORD = neo4j_config.password
 
 # --- 初始化 QA 系统 ---
-# 在Gradio应用启动前尝试初始化QA系统
-# 如果初始化失败，Gradio可能无法启动或功能不全
 try:
     logger.info("Initializing QA System for Gradio UI...")
     initialize_qa_system(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD)
@@ -42,32 +37,33 @@ except Exception as e:
     QA_SYSTEM_INIT_ERROR = f"QA系统初始化失败: {e}"
 
 
+# --- 全局状态变量 ---
+enable_web_search = gr.State(False)
+enable_table_output = gr.State(False)
+enable_multi_hop = gr.State(False)
+enable_search_progress = gr.State(False)
+
+
 # --- Gradio UI 函数 ---
 
-def format_triples_as_html(context: Dict[str, Any]) -> str:
-    """将知识图谱三元组格式化为HTML表格展示（使用统一的格式化工具）"""
-    # 注意：这个函数现在依赖于 answer_question 函数更新 QA system 实例的 current_kg_context
+def format_triples_as_html() -> str:
+    """将知识图谱三元组格式化为HTML表格展示"""
     try:
         qa_system = get_qa_system_instance()
-        kg_context = qa_system.current_kg_context  # 从实例获取最新的 KG 上下文
+        kg_context = qa_system.current_kg_context
     except RuntimeError:
         return "<p>错误：QA 系统未初始化。</p>"
     except AttributeError:
         return "<p>错误：无法从 QA 系统获取知识图谱上下文。</p>"
-
-    # 使用统一的格式化工具
     return format_kg_triples_html(kg_context)
 
 
 def handle_file_upload(files):
-    """处理文件上传，直接调用导出的 process_uploaded_files 函数"""
-    # 这个函数不需要 QA system 实例
+    """处理文件上传"""
     try:
         if not files:
             return "请选择至少一个文件上传"
-
         logger.info(f"UI: Processing upload of {len(files)} files...")
-        # 调用导出的函数
         result = process_uploaded_files(files)
         logger.info("UI: File processing finished.")
         return result
@@ -77,13 +73,12 @@ def handle_file_upload(files):
         logger.debug(traceback.format_exc())
         return error_msg
 
-# 新增函数：格式化智能体信息为HTML
+
 def format_agent_info_html(agent_name: str) -> str:
     """将智能体信息格式化为HTML"""
     if not agent_name:
         return "<p>未识别使用的智能体</p>"
     
-    # 智能体图标映射
     agent_icons = {
         "概念解释智能体": "📚",
         "需求分析智能体": "📋",
@@ -95,7 +90,6 @@ def format_agent_info_html(agent_name: str) -> str:
         "回退响应生成器": "🤖"
     }
     
-    # 智能体描述映射
     agent_descriptions = {
         "概念解释智能体": "专注于清晰解释软件工程概念、术语和方法论",
         "需求分析智能体": "专注于需求获取、分析、规格说明和需求管理",
@@ -115,81 +109,138 @@ def format_agent_info_html(agent_name: str) -> str:
 <div style="color: #555; font-size: 0.9em; margin-top: 4px;">{description}</div>
 </div>"""
 
-def answer_question_ui(question: str, chat_history):
-    """处理问题并更新对话历史，使用生成器实现实时进度显示"""
+
+def answer_question_ui(question: str, chat_history, 
+                       web_search_enabled, table_output_enabled, 
+                       multi_hop_enabled, search_progress_enabled):
+    """处理问题并更新对话历史，支持多种功能开关"""
     global QA_SYSTEM_INIT_ERROR
     if 'QA_SYSTEM_INIT_ERROR' in globals() and QA_SYSTEM_INIT_ERROR:
         error_msg = f"系统错误：{QA_SYSTEM_INIT_ERROR}"
-        yield chat_history, error_msg, error_msg, ""
+        yield chat_history, error_msg, error_msg, "", ""
         return
 
     try:
         qa_system = get_qa_system_instance()
 
         if not question or question.strip() == "":
-            yield chat_history, "", "", ""
+            yield chat_history, "", "", "", ""
             return
 
         logger.info(f"UI: Answering question: '{question}'")
+        logger.info(f"UI: Web search enabled: {web_search_enabled}")
+        logger.info(f"UI: Table output enabled: {table_output_enabled}")
+        logger.info(f"UI: Multi-hop enabled: {multi_hop_enabled}")
+        logger.info(f"UI: Search progress enabled: {search_progress_enabled}")
 
         start_time = time.time()
-        
-        # 初始状态
         current_triples = ""
         current_docs = ""
+        progress_messages = []
         
-        # 使用线程在后台处理
         import threading
-        result_container = {}
+        result_container = {
+            'done': False,
+            'response': None,
+            'triples': None,
+            'docs': None,
+            'error': None
+        }
+        
+        MAX_TIMEOUT = 240  # 最大超时时间（秒）- 4分钟，包含KG查询(30s) + RAG搜索(30s) + LLM调用(60-120s)
         
         def do_work():
-            # 执行实际工作
-            response = qa_system.answer_question(question)
-            # 获取最终结果
-            triples_html = format_triples_as_html({})
-            doc_results_raw = qa_system.current_doc_results_raw
-            rag_manager = qa_system.rag_manager
-            search_output_html = rag_manager.format_search_results_as_html(doc_results_raw)
-            result_container['response'] = response
-            result_container['triples'] = triples_html
-            result_container['docs'] = search_output_html
-            result_container['done'] = True
+            try:
+                response = qa_system.answer_question(
+                    question,
+                    web_search=web_search_enabled,
+                    table_output=table_output_enabled,
+                    multi_hop=multi_hop_enabled
+                )
+                
+                triples_html = format_triples_as_html()
+                doc_results_raw = qa_system.current_doc_results_raw
+                rag_manager = qa_system.rag_manager
+                search_output_html = rag_manager.format_search_results_as_html(doc_results_raw)
+                
+                result_container['response'] = response
+                result_container['triples'] = triples_html
+                result_container['docs'] = search_output_html
+            except Exception as e:
+                result_container['error'] = str(e)
+                logger.error(f"UI: Question processing error: {e}")
+                logger.debug(traceback.format_exc())
+            finally:
+                result_container['done'] = True
         
-        result_container['done'] = False
         thread = threading.Thread(target=do_work)
         thread.start()
         
         # 实时更新进度显示
+        step_count = 0
+        steps = ["正在分析问题...", "正在提取实体...", "正在检索知识图谱...", 
+                 "正在搜索文档...", "正在生成回答..."]
+        last_step = -1  # 记录上一次添加的步骤索引
+        
         while not result_container['done']:
             elapsed = time.time() - start_time
+            
+            # 检查超时
+            if elapsed >= MAX_TIMEOUT:
+                error_msg = f"请求超时！处理时间超过 {MAX_TIMEOUT} 秒，请稍后重试或简化问题。"
+                logger.error(f"UI: Request timeout after {MAX_TIMEOUT}s")
+                yield chat_history, "<p>请求超时</p>", "<p>请求超时</p>", error_msg, f"[{time.strftime('%H:%M:%S')}] 请求超时"
+                return
+            
+            if search_progress_enabled:
+                current_step_idx = min(step_count, len(steps)-1)
+                # 只有当步骤发生变化时才添加新的进度消息
+                if current_step_idx != last_step:
+                    step = steps[current_step_idx]
+                    progress_messages.append(f"[{time.strftime('%H:%M:%S')}] {step}")
+                    if len(progress_messages) > 10:
+                        progress_messages.pop(0)
+                    last_step = current_step_idx
+                progress_html = "<br>".join(progress_messages)
+            else:
+                progress_html = ""
+            
             status = f"processing | {elapsed:.1f}s"
-            yield chat_history, current_triples, current_docs, status
-            time.sleep(0.1)
+            yield chat_history, current_triples, current_docs, status, progress_html
+            
+            step_count += 1
+            time.sleep(0.5)
         
-        # 等待线程完成
         thread.join()
+        
+        # 检查是否有错误
+        if result_container['error']:
+            error_msg = f"处理问题时发生错误: {result_container['error']}"
+            logger.error(error_msg)
+            yield chat_history, f"<p>处理时出错: {result_container['error']}</p>", f"<p>处理时出错: {result_container['error']}</p>", error_msg, ""
+            return
+        
         total_time = time.time() - start_time
         
-        # 获取结果
         response = result_container['response']
         final_triples = result_container['triples']
         final_docs = result_container['docs']
         
-        # 从响应中提取答案和智能体名称
         if isinstance(response, dict):
             answer = response.get("answer", "未能获取答案")
             agent_name = response.get("agent_name", "未知智能体")
-            perf_data = response.get("performance", {})
         else:
             answer = response
             agent_name = "未知智能体"
-            perf_data = {}
 
-        # 创建智能体信息HTML
         agent_info_html = format_agent_info_html(agent_name)
+        
+        # 如果启用表格输出，尝试格式化答案为表格
+        if table_output_enabled and isinstance(response, dict):
+            answer = format_as_table(answer)
+        
         formatted_answer = f"{agent_info_html}\n\n{answer}"
 
-        # 更新对话历史
         try:
             new_history = chat_history if chat_history else []
             new_history = new_history + [
@@ -200,21 +251,58 @@ def answer_question_ui(question: str, chat_history):
             new_history = chat_history if chat_history else []
             new_history = new_history + [[question, formatted_answer]]
 
-        # 显示最终响应时间
         final_status = f"响应完成 | 总耗时: {total_time:.2f}秒"
         
+        # 添加最终进度信息
+        if search_progress_enabled:
+            progress_messages.append(f"[{time.strftime('%H:%M:%S')}] 回答生成完成")
+            progress_html = "<br>".join(progress_messages)
+        else:
+            progress_html = ""
+        
         logger.info(f"UI: Answer and contexts retrieved. 耗时: {total_time:.3f}s")
-        yield new_history, final_triples, final_docs, final_status
+        yield new_history, final_triples, final_docs, final_status, progress_html
 
     except RuntimeError as e:
         error_msg = f"系统错误: {str(e)}"
         logger.error(error_msg)
-        yield chat_history, "<p>QA系统未初始化</p>", "<p>QA系统未初始化</p>", error_msg
+        yield chat_history, "<p>QA系统未初始化</p>", "<p>QA系统未初始化</p>", error_msg, ""
     except Exception as e:
         error_msg = f"处理问题时发生意外错误: {str(e)}"
         logger.error(error_msg)
         logger.debug(traceback.format_exc())
-        yield chat_history, f"<p>处理时出错: {e}</p>", f"<p>处理时出错: {e}</p>", error_msg
+        yield chat_history, f"<p>处理时出错: {e}</p>", f"<p>处理时出错: {e}</p>", error_msg, ""
+
+
+def format_as_table(answer: str) -> str:
+    """尝试将答案格式化为表格形式"""
+    try:
+        import re
+        
+        # 检查是否有列表形式的内容
+        lines = answer.split('\n')
+        table_rows = []
+        
+        for line in lines:
+            # 匹配带有序号的列表项
+            match = re.match(r'^\s*\d+[\.\、]\s*(.*)', line)
+            if match:
+                table_rows.append(match.group(1))
+        
+        if len(table_rows) >= 2:
+            table_html = "<table style='width:100%; border-collapse:collapse; margin:10px 0;'>"
+            table_html += "<thead><tr><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>序号</th><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>内容</th></tr></thead>"
+            table_html += "<tbody>"
+            for i, row in enumerate(table_rows, 1):
+                table_html += f"<tr><td style='border:1px solid #ddd; padding:8px;'>{i}</td><td style='border:1px solid #ddd; padding:8px;'>{row}</td></tr>"
+            table_html += "</tbody></table>"
+            return table_html
+        
+        return answer
+    except Exception as e:
+        logger.error(f"表格格式化失败: {e}")
+        return answer
+
 
 def clear_conversation(chat_history) -> List:
     """清除对话历史"""
@@ -227,255 +315,723 @@ def clear_conversation(chat_history) -> List:
         logger.error(f"清除对话历史时出错: {e}")
         return chat_history
 
+
+def clear_input():
+    """清空输入框"""
+    return ""
+
+
+def clear_status_display():
+    """清空状态显示"""
+    return "", ""
+
+
+def handle_web_search_toggle(value):
+    """处理联网搜索开关"""
+    logger.info(f"联网搜索功能已{'启用' if value else '禁用'}")
+
+
+def handle_table_output_toggle(value):
+    """处理表格输出开关"""
+    logger.info(f"表格输出功能已{'启用' if value else '禁用'}")
+
+
+def handle_multi_hop_toggle(value):
+    """处理多跳推理开关"""
+    logger.info(f"多跳推理功能已{'启用' if value else '禁用'}")
+
+
+def handle_search_progress_toggle(value):
+    """处理检索进展开关"""
+    logger.info(f"检索进展显示已{'启用' if value else '禁用'}")
+
+
 # 自定义CSS样式
 custom_css = """
-body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-h1 { color: #2a81e3; text-align: center; font-size: 28px; margin-bottom: 5px; font-weight: bold; }
-h2 { font-size: 18px; margin-top: 0; margin-bottom: 15px; color: #555; text-align: center; font-weight: normal; }
-h3 { color: #333; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px;}
-h4 { color: #444; margin-top: 15px; margin-bottom: 10px; font-size: 1.1em; }
-
-/* 增加容器最大宽度 */
-.container { max-width: 1600px; margin: 20px auto; padding: 0 15px; }
-
-.header { text-align: center; margin-bottom: 30px; }
-.upload-section, .qa-section {
-    background-color: white; padding: 20px; border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 25px;
-}
-.chat-section {
-    background-color: white; padding: 20px; border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 20px;
+/* CSS自定义样式 - 简约时尚现代化专业科技风 */
+:root {
+    --primary: #6366f1;
+    --secondary: #8b5cf6;
+    --danger: #ef4444;
+    --danger-soft: #f87171;
+    --border-color: #e2e8f0;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-dark: 0 2px 8px rgba(0,0,0,0.2);
+    --shadow-light: 0 1px 3px rgba(0,0,0,0.1);
+    --radius: 8px;
+    --card-bg: #ffffff;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
 }
 
-/* 改进聊天消息样式，减少空白 */
-.message { 
-    margin: 8px 0; 
-    padding: 8px 12px;
-    border-radius: 10px;
+body { 
+    background-color: #f8fafc; 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
 }
-.user-message {
-    text-align: right;
-    background-color: #e1f0ff;
-    margin-left: 35%;  /* 减少左侧空白 */
-    display: inline-block;
-    max-width: 65%;
+
+h1 { 
+    color: #1f2937; 
+    font-size: 24px; 
+    font-weight: 600; 
+    margin: 0; 
 }
-.assistant-message {
-    text-align: left;
-    background-color: #f0f0f0;
-    margin-right: 15%;  /* 减少右侧空白 */
-    display: inline-block;
+
+h2 { 
+    font-size: 16px; 
+    color: #6b7280; 
+    font-weight: 400; 
+    margin: 4px 0 0 0; 
+}
+
+h3 { 
+    color: var(--primary); 
+    font-size: 14px; 
+    font-weight: 600; 
+    margin: 0 0 12px 0; 
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+h4 { 
+    color: #4b5563; 
+    font-size: 13px; 
+    font-weight: 500; 
+    margin: 12px 0 8px 0; 
+}
+
+/* 主容器样式 */
+.main-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+/* 顶部导航栏 - 56px高度，渐变背景 */
+.header-section {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    color: white;
+    height: 56px;
+    padding: 0 24px;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(99, 102, 241, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.header-section h1 {
+    color: white;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.header-section h2 {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    font-weight: 400;
+    margin: 0;
+}
+
+/* 卡片样式 */
+.card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-light);
+    border: 1px solid var(--border-color);
+    padding: 16px;
+}
+
+/* 设置项样式 */
+.setting-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+}
+
+.setting-item:last-child {
+    border-bottom: none;
+}
+
+.setting-item:hover {
+    background: rgba(99, 102, 241, 0.03);
+}
+
+/* Checkbox样式优化 */
+.gr-checkbox,
+.gr-checkbox-wrap,
+.checkbox-wrap,
+[data-testid="checkbox"] {
+    margin: 0 !important;
+    flex-shrink: 0;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 20px !important;
+    height: 20px !important;
+    transform: scale(1.1);
+}
+
+.gr-checkbox label,
+.gr-checkbox-wrap label,
+.checkbox-wrap label,
+[data-testid="checkbox"] label,
+.svelte-1gfwr6n,
+.label-wrap,
+.label-text {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.gr-checkbox input[type="checkbox"],
+input[type="checkbox"] {
+    width: 18px !important;
+    height: 18px !important;
+    cursor: pointer;
+    accent-color: var(--primary);
+    border-radius: 4px;
+    margin: 0 !important;
+}
+
+/* 设置内容区域 */
+.setting-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.setting-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.setting-title span {
+    font-size: 16px;
+}
+
+.setting-desc {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    padding-left: 24px;
+}
+
+/* 卡片头部样式 */
+.card-header {
+    padding: 12px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.card-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--primary);
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+/* 示例问题卡片样式 */
+.examples-card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-light);
+    padding: 16px;
+    margin-top: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.examples-card h3 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--primary);
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+/* 示例问题标签样式 */
+.examples-card button,
+.examples-card .gr-button,
+.examples-card input[type="button"] {
+    background: var(--card-bg) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    padding: 8px 12px !important;
+    margin: 4px !important;
+    transition: all 0.2s ease !important;
+    cursor: pointer !important;
+}
+
+.examples-card button:hover,
+.examples-card .gr-button:hover,
+.examples-card input[type="button"]:hover {
+    background: rgba(99, 102, 241, 0.08) !important;
+    color: var(--primary) !important;
+    border-color: var(--primary) !important;
+}
+
+/* 聊天消息样式 */
+.message {
+    margin: 12px 0;
+    padding: 12px 16px;
+    border-radius: 12px;
     max-width: 85%;
 }
 
-/* 优化聊天框样式 */
-.chatbot {
-    max-width: 100% !important;
-}
-.chatbot .message-wrap {
-    padding: 10px 20px !important;
-}
-
-/* 添加可调节的对话区域 */
-.resizable-chat {
-    resize: horizontal;
-    overflow: auto;
-    min-width: 600px;
-    max-width: 100%;
+.user-message {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    margin-left: auto;
+    border-radius: 12px 12px 4px 12px;
 }
 
-.example-btn { 
-    background-color: #f0f7ff !important; color: #2a81e3 !important;
-    border: 1px solid #bde0ff !important; border-radius: 20px !important;
-    margin: 5px !important; padding: 8px 18px !important; font-size: 13px !important;
-    transition: all 0.2s ease;
+.assistant-message {
+    background: rgba(99, 102, 241, 0.08);
+    color: var(--text-primary);
+    margin-right: auto;
+    border-radius: 12px 12px 12px 4px;
 }
-.example-btn:hover { background-color: #e1f0ff !important; box-shadow: 0 2px 5px rgba(42, 129, 227, 0.2); }
-.submit-btn { 
-    background-color: #2a81e3 !important; color: white !important; font-weight: bold;
-    border-radius: 8px !important; padding: 12px 20px !important; font-size: 15px !important;
-    transition: background-color 0.2s ease;
-}
-.submit-btn:hover { background-color: #1e6ac7 !important; }
-.clear-btn { 
-    background-color: #dc3545 !important; color: white !important;
-    border-radius: 8px !important; padding: 10px 16px !important; font-size: 14px !important;
-}
-.clear-btn:hover { background-color: #c82333 !important; }
-.tab-content { 
-    padding: 20px; background-color: #ffffff; border-radius: 0 0 8px 8px;
-    border: 1px solid #dee2e6; border-top: none; min-height: 200px;
-}
-footer { text-align: center; margin-top: 30px; color: #888; font-size: 12px; }
-.book-icon { font-size: 36px; color: #2a81e3; margin-right: 10px; vertical-align: middle;}
-.gr-label { 
-    font-weight: bold !important; color: #555 !important; margin-bottom: 5px !important;
-}
-.gr-box { border-radius: 8px !important; }
-.gr-input { border-radius: 8px !important; }
-.gr-button { border-radius: 8px !important; }
-.gr-dropdown { border-radius: 8px 8px 0 0 !important; }
 
 /* 状态显示样式 */
 .status-display {
-    color: #2a81e3;
-    font-size: 0.9em;
-    padding: 6px 16px;
-    background-color: #f0f7ff;
-    border-radius: 6px;
-    border: 1px solid #c9e2ff;
-    font-family: monospace;
-    font-weight: 500;
+    color: var(--primary);
+    font-size: 13px;
+    padding: 8px 16px;
+    background-color: rgba(99, 102, 241, 0.08);
+    border-radius: 8px;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+}
+
+/* 进度显示样式 */
+.progress-display {
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    max-height: 150px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+}
+
+/* 按钮样式 - 统一高度40px */
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%) !important;
+    color: white !important;
+    border: none !important;
+    font-weight: 500 !important;
+    border-radius: var(--radius) !important;
+    height: 40px !important;
+    min-width: 120px !important;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25) !important;
+    transition: all 0.2s ease !important;
+}
+
+.btn-primary:hover {
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35) !important;
+    transform: translateY(-1px);
+}
+
+/* 清空输入按钮 */
+.btn-secondary {
+    background: var(--card-bg) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--radius) !important;
+    height: 40px !important;
+    transition: all 0.2s ease !important;
+}
+
+.btn-secondary:hover {
+    background: rgba(0, 0, 0, 0.05) !important;
+    border-color: #cbd5e1 !important;
+}
+
+/* 清空历史按钮 - 柔和红色 */
+.btn-danger {
+    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--radius) !important;
+    height: 40px !important;
+    transition: all 0.2s ease !important;
+}
+
+.btn-danger:hover {
+    background: linear-gradient(135deg, #fca5a5 0%, #f87171 100%) !important;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25) !important;
+}
+
+/* 标签页样式 */
+.gr-tab {
+    font-weight: 500 !important;
+}
+
+.gr-tab:focus {
+    box-shadow: none !important;
+}
+
+/* 输入框样式 */
+.gr-input {
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border-color) !important;
+    padding: 12px 16px !important;
+}
+
+.gr-input:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
+}
+
+/* 下拉选择样式 */
+.gr-dropdown {
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border-color) !important;
+}
+
+/* 聊天历史区域 */
+.chat-history {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --border-color: #334155;
+        --card-bg: #1e293b;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+    }
+    
+    body {
+        background-color: #0f172a;
+    }
+    
+    h1 {
+        color: #f1f5f9;
+    }
+    
+    h2 {
+        color: #94a3b8;
+    }
+    
+    h4 {
+        color: #cbd5e1;
+    }
+    
+    .card {
+        box-shadow: var(--shadow-dark);
+    }
+    
+    .examples-card {
+        box-shadow: var(--shadow-dark);
+    }
+    
+    .setting-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
+    
+    .assistant-message {
+        background: rgba(255, 255, 255, 0.05);
+    }
+    
+    .progress-display {
+        background: rgba(255, 255, 255, 0.03);
+    }
+    
+    .btn-secondary {
+        background: #334155 !important;
+        color: #f1f5f9 !important;
+    }
+    
+    .btn-secondary:hover {
+        background: #475569 !important;
+    }
+    
+    .examples-card button,
+    .examples-card .gr-button,
+    .examples-card input[type="button"] {
+        background: #334155 !important;
+        color: #94a3b8 !important;
+        border-color: #475569 !important;
+    }
+    
+    .examples-card button:hover,
+    .examples-card .gr-button:hover,
+    .examples-card input[type="button"]:hover {
+        background: rgba(99, 102, 241, 0.15) !important;
+        color: #c7d2fe !important;
+    }
+    
+    .header-section h2 {
+        color: rgba(255, 255, 255, 0.7);
+    }
 }
 """
 
-# 创建Gradio界面
+
 def create_ui():
     with gr.Blocks() as app:
-        with gr.Column(elem_classes=["container"]):
-            # 标题区域
-            with gr.Row():
-                gr.HTML("""
-                <div class="header">
-                    <h1><span class="book-icon">🎓</span> 软件工程课程助手</h1>
-                    <h2>基于大语言模型与知识图谱的智能学习辅助系统</h2>
-                </div>
-                """)
-
-            # 主要布局：调整比例，让右侧更宽
-            with gr.Row(variant="panel"):
-                # 左侧上传部分 - 减小scale（使用整数）
-                with gr.Column(scale=1, min_width=300, elem_classes=["upload-section"]):
-                    gr.HTML("<h3>📥 上传课程资料</h3>")
+        gr.HTML("""
+        <div class="main-container">
+            <div class="header-section">
+                <h1>🎓 软件工程课程助手</h1>
+                <h2>基于大语言模型与知识图谱的智能学习辅助系统</h2>
+            </div>
+        """)
+        
+        # 主标签页
+        with gr.Tabs():
+            # 对话交互标签页
+            with gr.TabItem("对话交互"):
+                with gr.Row():
+                    # 左侧：对话设置
+                    with gr.Column(scale=1, min_width=280):
+                        # 对话设置卡片 - 合并所有设置项
+                        with gr.Group(elem_classes=["card", "settings-card"]):
+                            gr.HTML("""<div class="card-header"><h3>⚙️ 对话设置</h3></div>""")
+                            
+                            # 启用联网搜索
+                            with gr.Row(elem_classes=["setting-item"]):
+                                web_search_toggle = gr.Checkbox(value=False, label="", show_label=False)
+                                gr.HTML("""<div class="setting-content">
+                                    <div class="setting-title"><span>🌐</span> 启用联网搜索</div>
+                                    <div class="setting-desc">联网获取最新动态</div>
+                                </div>""")
+                            
+                            # 表格格式输出
+                            with gr.Row(elem_classes=["setting-item"]):
+                                table_output_toggle = gr.Checkbox(value=False, label="", show_label=False)
+                                gr.HTML("""<div class="setting-content">
+                                    <div class="setting-title"><span>📊</span> 表格格式输出</div>
+                                    <div class="setting-desc">使用Markdown表格展示结构化回答</div>
+                                </div>""")
+                            
+                            # 启用多跳推理
+                            with gr.Row(elem_classes=["setting-item"]):
+                                multi_hop_toggle = gr.Checkbox(value=False, label="", show_label=False)
+                                gr.HTML("""<div class="setting-content">
+                                    <div class="setting-title"><span>🔗</span> 启用多跳推理</div>
+                                    <div class="setting-desc">使用高级多跳推理机制（较慢但更全面）</div>
+                                </div>""")
+                            
+                            # 显示检索进展
+                            with gr.Row(elem_classes=["setting-item"]):
+                                search_progress_toggle = gr.Checkbox(value=True, label="", show_label=False)
+                                gr.HTML("""<div class="setting-content">
+                                    <div class="setting-title"><span>📈</span> 显示检索进展</div>
+                                    <div class="setting-desc">实时显示检索和处理进度</div>
+                                </div>""")
+                        
+                        # 检索进展显示区域
+                        with gr.Group(elem_classes=["card"]):
+                            gr.HTML("<h4>🔄 检索进展</h4>")
+                            progress_output = gr.HTML(
+                                value="<div class='progress-display'>等待输入...</div>",
+                                elem_classes=["progress-display"]
+                            )
+                
+                    # 右侧：对话历史和输入区域
+                    with gr.Column(scale=3):
+                        # 知识图谱三元组显示
+                        with gr.Group(elem_classes=["card"]):
+                            gr.HTML("<h3>📚 知识图谱</h3>")
+                            kg_triples_output = gr.HTML(value="<div>等待输入...</div>")
+                        
+                        # 对话历史
+                        with gr.Group(elem_classes=["card"]):
+                            gr.HTML("<h3>💬 对话历史</h3>")
+                            chat_display = gr.Chatbot(
+                                label="",
+                                height=450,
+                                show_label=False,
+                                render_markdown=True,
+                                elem_classes=["chat-history"]
+                            )
+                        
+                        # 状态显示
+                        status_display = gr.Markdown("", elem_classes=["status-display"])
+                        
+                        # 输入区域
+                        with gr.Row():
+                            question_input = gr.Textbox(
+                                placeholder="输入软件工程相关问题",
+                                label="",
+                                lines=1,
+                                show_label=False,
+                                scale=4,
+                                elem_classes=["gr-input"]
+                            )
+                            submit_button = gr.Button("提交问题", variant="primary", elem_classes=["btn-primary"])
+                        
+                        # 操作按钮
+                        with gr.Row():
+                            clear_button = gr.Button("清空输入", elem_classes=["btn-secondary"])
+                            clear_history_button = gr.Button("清空对话历史", elem_classes=["btn-danger"])
+                        
+                        # 示例问题
+                        with gr.Group(elem_classes=["examples-card"]):
+                            gr.HTML("<h3>💡 快速提问示例</h3>")
+                            example_questions = [
+                                "函数式编程的概念是什么？", 
+                                "敏捷开发的核心原则是什么？",
+                                "软件测试与质量保证有什么区别？", 
+                                "UML图有哪些类型？",
+                                "设计模式的作用是什么？", 
+                                "如何进行软件架构评估？",
+                                "什么是微服务架构？",
+                                "SOLID原则包括哪些内容？"
+                            ]
+                            gr.Examples(
+                                examples=example_questions, 
+                                inputs=question_input, 
+                                label=""
+                            )
+            
+            # 知识库管理标签页
+            with gr.TabItem("知识库管理"):
+                with gr.Group(elem_classes=["card"]):
+                    gr.HTML("<h3>📁 上传课程资料</h3>")
                     file_upload = gr.File(
                         file_types=[".txt", ".pdf"],
                         file_count="multiple",
                         label="选择或拖拽文件 (支持TXT/PDF)"
                     )
-                    upload_button = gr.Button("处理上传的文件", variant="primary")
-                    upload_status = gr.Textbox(label="文件处理状态", lines=8, interactive=False, 
-                                            placeholder="上传并处理文件后，这里会显示状态...")
-
-                # 右侧问答和对话部分 - 增大scale（使用整数）并调整min_width
-                with gr.Column(scale=3, min_width=800, elem_classes=["resizable-chat"]):
-                    # 对话聊天部分
-                    with gr.Column(elem_classes=["chat-section"]):
-                        gr.HTML("<h3>💬 课程对话</h3>")
-                        
-                        # 聊天记录显示区域 - 增加高度
-                        chat_display = gr.Chatbot(
-                            label="对话历史",
-                            height=500,  # 增加高度
-                            show_label=True,
-                            render_markdown=True,
-                            elem_classes=["chatbot"]  # 添加自定义类
-                        )
-                        
-                        # 输入和按钮区域
-                        with gr.Row():
-                            question_input = gr.Textbox(
-                                placeholder="输入您的问题，例如: 什么是敏捷开发？",
-                                label="提问",
-                                lines=1,
-                                show_label=False,
-                                scale=4
-                            )
-                            submit_button = gr.Button("发送", variant="primary", scale=1)
-                        
-                        # 状态显示区域
-                        with gr.Row():
-                            status_display = gr.Markdown("", elem_classes="status-display")
-                        
-                        # 操作按钮行
-                        with gr.Row():
-                            clear_button = gr.Button("清除对话历史", variant="secondary", elem_classes=["clear-btn"])
-                    
-                    # 详细信息标签页
-                    gr.HTML("<h3>🔍 详细信息</h3>")
-                    with gr.Tabs():
-                        with gr.TabItem("知识图谱"):
-                            triples_output = gr.HTML(label="检索到的知识图谱信息")
-                        with gr.TabItem("相关文档"):
-                            search_output_html = gr.HTML(label="检索到的文档信息")
-                    
-                    # 示例问题区域
-                    gr.HTML("<h4>快速提问示例:</h4>")
-                    example_questions = [
-                        "函数式编程的概念是什么？", "敏捷开发的核心原则是什么？",
-                        "软件测试与质量保证有什么区别？", "UML图有哪些类型？",
-                        "设计模式的作用是什么？", "如何进行软件架构评估？"
-                    ]
-                    gr.Examples(
-                        examples=example_questions, 
-                        inputs=question_input, 
-                        label=""
-                    )
-
-            # 页脚
-            gr.HTML("""
-            <footer>
+                    upload_button = gr.Button("处理上传的文件", variant="primary", elem_classes=["btn-primary"])
+                    upload_status = gr.Textbox(label="文件处理状态", lines=8, interactive=False)
+        
+        # 文档检索结果显示组件（隐藏，仅用于接收回答问题时的文档搜索结果）
+        docs_output = gr.HTML(visible=False)
+        
+        gr.HTML("""
+        </div>
+        <footer style="text-align: center; margin: 20px 0; color: #9ca3af; font-size: 12px;">
             Powered by LLM + Knowledge Graph + RAG | 软件工程课程专用学习助手
-            </footer>
-            """)
+        </footer>
+        """)
 
         # --- 事件绑定 ---
-
-        # 文件上传按钮点击事件
+        
+        # 文件上传
         upload_button.click(
             fn=handle_file_upload,
             inputs=[file_upload],
             outputs=[upload_status]
         )
-
-        # 提交问题按钮点击事件
-        submit_button.click(
-            fn=answer_question_ui,
-            inputs=[question_input, chat_display],
-            outputs=[chat_display, triples_output, search_output_html, status_display]
-        ).then(
-            # 清空输入框
-            lambda: "",
-            None,
-            question_input
-        )
-
-        # 问题输入框回车事件 (等同于点击提交)
-        question_input.submit(
-            fn=answer_question_ui,
-            inputs=[question_input, chat_display],
-            outputs=[chat_display, triples_output, search_output_html, status_display]
-        ).then(
-            # 清空输入框
-            lambda: "",
-            None,
-            question_input
+        
+        # 开关状态绑定
+        web_search_toggle.change(
+            fn=handle_web_search_toggle,
+            inputs=[web_search_toggle],
+            outputs=[]
         )
         
-        # 清除对话历史按钮
+        table_output_toggle.change(
+            fn=handle_table_output_toggle,
+            inputs=[table_output_toggle],
+            outputs=[]
+        )
+        
+        multi_hop_toggle.change(
+            fn=handle_multi_hop_toggle,
+            inputs=[multi_hop_toggle],
+            outputs=[]
+        )
+        
+        search_progress_toggle.change(
+            fn=handle_search_progress_toggle,
+            inputs=[search_progress_toggle],
+            outputs=[]
+        )
+        
+        # 提交问题
+        submit_button.click(
+            fn=answer_question_ui,
+            inputs=[question_input, chat_display, 
+                    web_search_toggle, table_output_toggle, 
+                    multi_hop_toggle, search_progress_toggle],
+            outputs=[chat_display, kg_triples_output, docs_output, status_display, progress_output]
+        ).then(
+            fn=clear_input,
+            inputs=None,
+            outputs=[question_input]
+        )
+        
+        question_input.submit(
+            fn=answer_question_ui,
+            inputs=[question_input, chat_display, 
+                    web_search_toggle, table_output_toggle, 
+                    multi_hop_toggle, search_progress_toggle],
+            outputs=[chat_display, kg_triples_output, docs_output, status_display, progress_output]
+        ).then(
+            fn=clear_input,
+            inputs=None,
+            outputs=[question_input]
+        )
+        
+        # 清空输入
         clear_button.click(
+            fn=clear_input,
+            inputs=None,
+            outputs=[question_input]
+        )
+        
+        # 清空对话历史
+        
+        clear_history_button.click(
             fn=clear_conversation,
             inputs=[chat_display],
             outputs=[chat_display]
+        ).then(
+            fn=clear_status_display,
+            inputs=None,
+            outputs=[status_display, progress_output]
         )
-
+    
     return app
 
-# 创建并启动界面
+
 if __name__ == "__main__":
-    # 检查 QA 系统是否成功初始化
     if 'QA_SYSTEM_INIT_ERROR' in globals() and QA_SYSTEM_INIT_ERROR:
-            logger.error(f"!!! Gradio UI cannot start due to QA System initialization error: {QA_SYSTEM_INIT_ERROR} !!!")
-            with gr.Blocks() as error_app:
-                gr.Markdown(f"# 系统启动失败\n\n无法初始化问答系统，请检查配置和后台服务。\n\n**错误信息:**\n```\n{QA_SYSTEM_INIT_ERROR}\n```")
-            logger.info("\nLaunching error display UI...")
-            error_app.launch(share=True)
+        logger.error(f"!!! Gradio UI cannot start due to QA System initialization error: {QA_SYSTEM_INIT_ERROR} !!!")
+        with gr.Blocks() as error_app:
+            gr.Markdown(f"# 系统启动失败\n\n无法初始化问答系统，请检查配置和后台服务。\n\n**错误信息:**\n```\n{QA_SYSTEM_INIT_ERROR}\n```")
+        logger.info("\nLaunching error display UI...")
+        error_app.launch(share=True)
     else:
-            logger.info("\nLaunching Gradio UI...")
-            app = create_ui()
-            app.queue()  # 启用队列以支持生成器
-            app.launch(
-                share=True,
-                css=custom_css,
-                theme=gr.themes.Soft()
-            ) # share=True 会创建公网链接
+        logger.info("\nLaunching Gradio UI...")
+        app = create_ui()
+        app.queue()
+        app.launch(
+            share=True,
+            theme=gr.themes.Soft(),
+            css=custom_css
+        )
