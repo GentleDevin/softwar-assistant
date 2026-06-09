@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>软件工程课程助手 | 智能学习辅助系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#8B5CF6',
+            primaryLight: '#A78BFA',
+            darkBg: '#0F172A',
+            cardBg: '#1E293B',
+            accentRed: '#EF4444',
+            neutralGray: '#334155'
+          },
+          fontFamily: {
+            tech: ['Inter', 'system-ui', 'sans-serif'],
+          },
+          boxShadow: {
+            glow: '0 0 12px rgba(139, 92, 246, 0.25)',
+            card: '0 4px 20px rgba(0,0,0,0.3)',
+          }
+        },
+      }
+    }
+  </script>
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto { content-visibility: auto; }
+      .glass-card {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+        border: 1px solid rgba(139, 92, 246, 0.2);
+        backdrop-filter: blur(8px);
+      }
+      .btn-hover { transition: all 0.25s ease; }
+      .btn-hover:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(139, 92, 246, 0.35); }
+      .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+      .scrollbar-thin::-webkit-scrollbar-track { background: #1E293B; border-radius: 10px; }
+      .scrollbar-thin::-webkit-scrollbar-thumb { background: #8B5CF6; border-radius: 10px; }
+      .pulse-animation { animation: pulse 1.8s infinite ease-in-out; }
+      @keyframes pulse {
+        0%, 100% { opacity: 0.7; }
+        50% { opacity: 1; }
+      }
+      .tag-btn { transition: all 0.2s; }
+      .tag-btn:hover { background: rgba(139, 92, 246, 0.3); }
+      .tab-btn { transition: all 0.2s; }
+      .tab-btn.active {
+        border-bottom: 2px solid #8B5CF6;
+        color: #8B5CF6;
+        font-weight: 500;
+      }
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
+      /* 上传区动画 */
+      .upload-area {
+        border: 2px dashed rgba(139, 92, 246, 0.4);
+        transition: all 0.3s ease;
+      }
+      .upload-area.dragover {
+        border-color: #8B5CF6;
+        background: rgba(139, 92, 246, 0.1);
+        transform: scale(1.01);
+      }
+      /* 文件项动画 */
+      .file-item { transition: all 0.25s ease; }
+      .file-item:hover { background: rgba(139, 92, 246, 0.15); }
+      /* 进度条 */
+      .progress-bar {
+        height: 4px;
+        background: linear-gradient(90deg, #8B5CF6, #A78BFA);
+        border-radius: 2px;
+        transition: width 0.3s ease;
+      }
+    }
+  </style>
+</head>
+<body class="bg-darkBg text-gray-100 font-tech min-h-screen p-4 md:p-6">
+  <!-- 顶部标题栏 -->
+  <header class="w-full max-w-7xl mx-auto mb-6">
+    <div class="bg-gradient-to-r from-primary to-primaryLight rounded-lg px-5 py-3 flex justify-between items-center shadow-glow">
+      <h1 class="text-xl md:text-2xl font-bold flex items-center gap-2">
+        <i class="fa fa-graduation-cap"></i>
+        软件工程课程助手
+      </h1>
+      <p class="text-sm md:text-base text-white/90">基于大语言模型与知识图谱的智能学习辅助系统</p>
+    </div>
+    <!-- 标签页 -->
+    <div class="flex mt-4 border-b border-primary/20">
+      <button id="tabChat" class="tab-btn active px-5 py-2.5">对话交互</button>
+      <button id="tabKB" class="tab-btn px-5 py-2.5 text-gray-400 hover:text-primary transition-colors">知识库管理</button>
+    </div>
+  </header>
+
+  <!-- 对话交互面板 -->
+  <div id="panelChat" class="tab-panel active">
+    <main class="max-w-7xl mx-auto grid grid-cols-12 gap-5">
+      <!-- 左侧侧边栏 -->
+      <aside class="col-span-12 lg:col-span-3 flex flex-col gap-5">
+        <!-- 对话设置卡片 -->
+        <div class="glass-card rounded-xl p-4 shadow-card">
+          <h2 class="text-base font-semibold mb-4 flex items-center gap-2 text-primaryLight">
+            <i class="fa fa-cog"></i>对话设置
+          </h2>
+          <div class="flex flex-col divide-y divide-neutralGray/40">
+            <!-- 启用联网搜索 -->
+            <label class="flex items-center justify-between py-3 cursor-pointer group">
+              <div class="flex items-start gap-3">
+                <i class="fa fa-globe text-xl text-blue-400 mt-0.5"></i>
+                <div>
+                  <p class="font-medium text-gray-100 group-hover:text-primaryLight transition-colors">启用联网搜索</p>
+                  <p class="text-xs text-gray-400 mt-0.5">联网获取最新动态</p>
+                </div>
+              </div>
+              <input type="checkbox" class="w-4 h-4 accent-primary rounded">
+            </label>
+
+            <!-- 表格格式输出 -->
+            <label class="flex items-center justify-between py-3 cursor-pointer group">
+              <div class="flex items-start gap-3">
+                <i class="fa fa-bar-chart text-xl text-green-400 mt-0.5"></i>
+                <div>
+                  <p class="font-medium text-gray-100 group-hover:text-primaryLight transition-colors">表格格式输出</p>
+                  <p class="text-xs text-gray-400 mt-0.5">使用Markdown表格展示结构化回答</p>
+                </div>
+              </div>
+              <input type="checkbox" class="w-4 h-4 accent-primary rounded">
+            </label>
+
+            <!-- 启用多跳推理 -->
+            <label class="flex items-center justify-between py-3 cursor-pointer group">
+              <div class="flex items-start gap-3">
+                <i class="fa fa-link text-xl text-yellow-400 mt-0.5"></i>
+                <div>
+                  <p class="font-medium text-gray-100 group-hover:text-primaryLight transition-colors">启用多跳推理</p>
+                  <p class="text-xs text-gray-400 mt-0.5">使用高级多跳推理机制（较慢但更全面）</p>
+                </div>
+              </div>
+              <input type="checkbox" class="w-4 h-4 accent-primary rounded">
+            </label>
+
+            <!-- 显示检索进展 -->
+            <label class="flex items-center justify-between py-3 cursor-pointer group">
+              <div class="flex items-start gap-3">
+                <i class="fa fa-line-chart text-xl text-red-400 mt-0.5"></i>
+                <div>
+                  <p class="font-medium text-gray-100 group-hover:text-primaryLight transition-colors">显示检索进展</p>
+                  <p class="text-xs text-gray-400 mt-0.5">实时显示检索和处理进度</p>
+                </div>
+              </div>
+              <input type="checkbox" checked class="w-4 h-4 accent-primary rounded">
+            </label>
+          </div>
+        </div>
+
+        <!-- 检索进展卡片 -->
+        <div class="glass-card rounded-xl p-4 shadow-card flex-1">
+          <h2 class="text-base font-semibold mb-3 flex items-center gap-2 text-primaryLight">
+            <i class="fa fa-spinner fa-spin pulse-animation"></i>检索进展
+          </h2>
+          <div class="w-full bg-neutralGray/50 rounded-lg p-3 min-h-[80px]">
+            <p class="text-gray-400 text-sm">等待输入...</p>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 右侧主内容区 -->
+      <section class="col-span-12 lg:col-span-9 flex flex-col gap-4">
+        <!-- 知识图谱输入栏 -->
+        <div class="glass-card rounded-xl p-3.5 shadow-card">
+          <div class="flex items-center gap-2 mb-1.5 text-primaryLight text-sm">
+            <i class="fa fa-map"></i>知识图谱
+          </div>
+          <input placeholder="等待输入..." class="w-full bg-transparent outline-none text-sm text-gray-200">
+        </div>
+
+        <!-- 对话历史主窗口 -->
+        <div class="glass-card rounded-xl p-4 shadow-card flex-1 min-h-[380px] flex flex-col">
+          <div class="flex items-center justify-between mb-3 text-primaryLight text-sm">
+            <span class="flex items-center gap-2"><i class="fa fa-comments"></i>对话历史</span>
+            <span class="text-gray-400 text-xs">processing | 0.0s</span>
+          </div>
+          <div class="flex-1 overflow-y-auto scrollbar-thin bg-darkBg/60 rounded-lg p-3" id="chatContainer"></div>
+        </div>
+
+        <!-- 输入控制区 -->
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-col sm:flex-row gap-3">
+            <input id="questionInput" placeholder="输入软件工程相关问题" class="flex-1 bg-neutralGray/40 rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-primary/50 transition-all">
+            <button id="submitBtn" class="bg-primary px-6 py-3 rounded-lg btn-hover font-medium">提交问题</button>
+          </div>
+          <div class="flex gap-3">
+            <button id="clearInputBtn" class="flex-1 bg-neutralGray/50 py-2.5 rounded-lg btn-hover">清空输入</button>
+            <button id="clearHistoryBtn" class="flex-1 bg-accentRed py-2.5 rounded-lg btn-hover font-medium">清空对话历史</button>
+          </div>
+        </div>
+
+        <!-- 快速提问示例 -->
+        <div class="glass-card rounded-xl p-4 shadow-card">
+          <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-primaryLight">
+            <i class="fa fa-lightbulb-o"></i>快速提问示例 Examples
+          </h3>
+          <div class="flex flex-wrap gap-2">
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">函数式编程的概念是什么？</button>
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">敏捷开发的核心原则是什么？</button>
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">软件测试与质量保证有什么区别？</button>
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">UML图有哪些类型？</button>
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">设计模式的作用是什么？</button>
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">如何进行软件架构评估？</button>
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">什么是微服务架构？</button>
+            <button class="tag-btn px-3 py-1.5 bg-neutralGray/40 rounded-md text-xs">SOLID原则包括哪些内容？</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 知识库管理面板（优化后） -->
+  <div id="panelKB" class="tab-panel">
+    <main class="max-w-7xl mx-auto">
+      <div class="glass-card rounded-xl p-6 shadow-card">
+        <!-- 标题栏 -->
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-xl font-semibold text-primaryLight flex items-center gap-2">
+            <i class="fa fa-database"></i>知识库管理
+          </h2>
+          <button id="buildIndexBtn" class="bg-primary px-4 py-2 rounded-lg btn-hover text-sm font-medium flex items-center gap-2">
+            <i class="fa fa-cogs"></i>构建索引
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- 左侧：拖放上传区 -->
+          <div class="glass-card rounded-xl p-5 shadow-card">
+            <h3 class="text-base font-medium mb-4 text-gray-200 flex items-center gap-2">
+              <i class="fa fa-cloud-upload text-primaryLight"></i>上传文档
+            </h3>
+            <!-- 拖放区域 -->
+            <div id="uploadArea" class="upload-area rounded-xl p-8 text-center cursor-pointer">
+              <i class="fa fa-file-text-o text-4xl text-primaryLight mb-3"></i>
+              <p class="text-gray-200 font-medium">拖放文件到此处，或点击上传</p>
+              <p class="text-xs text-gray-400 mt-2">支持 PDF、DOCX、DOC、TXT、MD 格式，单个文件≤20MB</p>
+              <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.docx,.doc,.txt,.md">
+              <button id="selectFileBtn" class="mt-4 bg-primary/80 px-5 py-2 rounded-lg btn-hover text-sm">选择文件</button>
+            </div>
+            <!-- 上传提示 -->
+            <p class="text-xs text-gray-400 mt-3">上传后自动解析并入库，可在右侧列表管理</p>
+          </div>
+
+          <!-- 右侧：文档列表 -->
+          <div class="glass-card rounded-xl p-5 shadow-card flex flex-col">
+            <h3 class="text-base font-medium mb-4 text-gray-200 flex items-center gap-2">
+              <i class="fa fa-list-alt text-primaryLight"></i>文档列表
+            </h3>
+            <!-- 列表头部 -->
+            <div class="flex items-center justify-between text-xs text-gray-400 mb-2 px-2">
+              <span>文件名</span>
+              <div class="flex gap-6">
+                <span>大小</span>
+                <span>状态</span>
+                <span>操作</span>
+              </div>
+            </div>
+            <!-- 列表容器 -->
+            <div id="fileList" class="flex-1 overflow-y-auto scrollbar-thin min-h-[220px]">
+              <!-- 空状态 -->
+              <div id="emptyState" class="flex flex-col items-center justify-center h-full text-gray-400 py-10">
+                <i class="fa fa-folder-open-o text-3xl mb-2"></i>
+                <p class="text-sm">暂无文档，请上传文件</p>
+              </div>
+              <!-- 文件项示例（JS动态生成） -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部：统计与操作 -->
+        <div class="mt-6 pt-4 border-t border-primary/20 flex flex-wrap items-center justify-between gap-4">
+          <div class="text-sm text-gray-300">
+            共 <span id="fileCount" class="text-primaryLight font-medium">0</span> 个文档 · 
+            已索引 <span id="indexedCount" class="text-primaryLight font-medium">0</span> 个
+          </div>
+          <div class="flex gap-3">
+            <button id="clearAllBtn" class="bg-neutralGray/50 px-4 py-2 rounded-lg btn-hover text-sm">清空全部</button>
+            <button id="syncBtn" class="bg-primary/80 px-4 py-2 rounded-lg btn-hover text-sm font-medium flex items-center gap-1">
+              <i class="fa fa-refresh"></i>同步知识库
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 页脚 -->
+  <footer class="max-w-7xl mx-auto mt-8 text-center text-gray-500 text-xs">
+    Powered by LLM + Knowledge Graph + RAG | 软件工程课程专用学习助手
+  </footer>
+
+  <script>
+    // Tab 切换逻辑
+    const tabChat=document.getElementById('tabChat');
+    const tabKB=document.getElementById('tabKB');
+    const panelChat=document.getElementById('panelChat');
+    const panelKB=document.getElementById('panelKB');
+
+    tabChat.addEventListener('click', () => {
+      tabChat.classList.add('active');
+      tabKB.classList.remove('active');
+      panelChat.classList.add('active');
+      panelKB.classList.remove('active');
+    });
+
+    tabKB.addEventListener('click', () => {
+      tabChat.classList.remove('active');
+      tabKB.classList.add('active');
+      panelChat.classList.remove('active');
+      panelKB.classList.add('active');
+    });
+
+    // ========== 对话交互逻辑 ==========
+    const inputEl = document.getElementById('questionInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const chatContainer = document.getElementById('chatContainer');
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    const clearInputBtn = document.getElementById('clearInputBtn');
+    const tagBtns = document.querySelectorAll('.tag-btn');
+
+    // 提交消息
+    submitBtn.addEventListener('click', () => {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      const userMsg = document.createElement('div');
+      userMsg.className = 'mb-3 p-2.5 bg-primary/20 rounded-lg max-w-[80%] ml-auto';
+      userMsg.innerHTML = `<p class="text-sm">${text}</p>`;
+      chatContainer.appendChild(userMsg);
+      inputEl.value = '';
+      chatContainer.scrollTop=chatContainer.scrollHeight;
+      // 模拟回复
+      setTimeout(() => {
+        const aiMsg = document.createElement('div');
+        aiMsg.className = 'mb-3 p-2.5 bg-neutralGray/40 rounded-lg max-w-[80%]';
+        aiMsg.innerHTML = `<p class="text-sm">已收到您的问题：${text}。我是软件工程助手，会为您解答相关知识。</p>`;
+        chatContainer.appendChild(aiMsg);
+        chatContainer.scrollTop=chatContainer.scrollHeight;
+      }, 800);
+    });
+    // 回车提交
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitBtn.click();
+    });
+    // 清空输入
+    clearInputBtn.addEventListener('click', () => inputEl.value = '');
+    // 清空对话
+    clearHistoryBtn.addEventListener('click', () => chatContainer.innerHTML = '');
+    // 快捷提问点击填充
+    tagBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        inputEl.value=btn.innerText;
+        inputEl.focus();
+      });
+    });
+
+    // ========== 知识库上传逻辑 ==========
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const selectFileBtn = document.getElementById('selectFileBtn');
+    const fileList = document.getElementById('fileList');
+    const emptyState = document.getElementById('emptyState');
+    const fileCountEl = document.getElementById('fileCount');
+    const indexedCountEl = document.getElementById('indexedCount');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+    const buildIndexBtn = document.getElementById('buildIndexBtn');
+
+    let fileDataList = []; // 存储文件数据
+
+    // 选择文件按钮
+    selectFileBtn.addEventListener('click', () => fileInput.click());
+
+    // 拖放事件
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragover');
+    });
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      handleFiles(e.dataTransfer.files);
+    });
+
+    // 文件选择
+    fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+    // 处理文件
+    function handleFiles(files) {
+      if (files.length === 0) return;
+      emptyState.style.display = 'none';
+      
+      Array.from(files).forEach(file => {
+        // 校验格式和大小
+        const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'text/plain', 'text/markdown'];
+        const validExts = ['.pdf', '.docx', '.doc', '.txt', '.md'];
+        const fileExt = file.name.toLowerCase().slice(-4);
+        if (!validTypes.includes(file.type) && !validExts.some(ext => file.name.toLowerCase().endsWith(ext))) {
+          alert(`文件 ${file.name} 格式不支持`);
+          return;
+        }
+        if (file.size > 20 * 1024 * 1024) {
+          alert(`文件 ${file.name} 超过20MB`);
+          return;
+        }
+
+        // 添加到列表
+        const fileId = Date.now() + Math.random();
+        const fileData = {
+          id: fileId,
+          name: file.name,
+          size: formatFileSize(file.size),
+          status: '待索引',
+          progress: 0
+        };
+        fileDataList.push(fileData);
+        renderFileItem(fileData);
+        updateStats();
+
+        // 模拟上传进度
+        simulateUploadProgress(fileId);
+      });
+    }
+
+    // 渲染文件项
+    function renderFileItem(fileData) {
+      const fileItem = document.createElement('div');
+      fileItem.className = 'file-item flex items-center justify-between p-3 rounded-lg mb-2 bg-neutralGray/30';
+      fileItem.id = `file-${fileData.id}`;
+      fileItem.innerHTML = `
+        <div class="flex items-center gap-2 flex-1 min-w-0">
+          <i class="fa ${getFileIcon(fileData.name)} text-primaryLight"></i>
+          <span class="text-sm text-gray-200 truncate">${fileData.name}</span>
+        </div>
+        <div class="flex items-center gap-6 text-xs">
+          <span class="text-gray-400 w-16 text-right">${fileData.size}</span>
+          <span class="${fileData.status === '已索引' ? 'text-green-400' : 'text-yellow-400'} w-16 text-center">${fileData.status}</span>
+          <div class="flex gap-2">
+            <button class="text-gray-400 hover:text-primaryLight preview-btn" title="预览"><i class="fa fa-eye"></i></button>
+            <button class="text-gray-400 hover:text-accentRed delete-btn" title="删除"><i class="fa fa-trash"></i></button>
+          </div>
+        </div>
+        <!-- 进度条 -->
+        <div class="w-full h-1 bg-neutralGray/50 rounded mt-2 hidden progress-container">
+          <div class="progress-bar" style="width: 0%"></div>
+        </div>
+      `;
+      fileList.appendChild(fileItem);
+
+      // 删除按钮
+      fileItem.querySelector('.delete-btn').addEventListener('click', () => {
+        fileDataList = fileDataList.filter(item => item.id !== fileData.id);
+        fileItem.remove();
+        updateStats();
+        if (fileDataList.length === 0) emptyState.style.display = 'flex';
+      });
+    }
+
+    // 模拟上传进度
+    function simulateUploadProgress(fileId) {
+      const fileItem = document.getElementById(`file-${fileId}`);
+      const progressContainer = fileItem.querySelector('.progress-container');
+      const progressBar = fileItem.querySelector('.progress-bar');
+      const statusEl = fileItem.querySelector('.text-yellow-400, .text-green-400');
+      
+      progressContainer.classList.remove('hidden');
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress >= 100) {
+          progress = 100;
+          clearInterval(interval);
+          statusEl.textContent = '已上传';
+          statusEl.className = 'text-blue-400 w-16 text-center';
+          progressContainer.classList.add('hidden');
+        }
+        progressBar.style.width = `${progress}%`;
+      }, 200);
+    }
+
+    // 构建索引
+    buildIndexBtn.addEventListener('click', () => {
+      if (fileDataList.length === 0) {
+        alert('请先上传文件');
+        return;
+      }
+      fileDataList.forEach(fileData => {
+        if (fileData.status !== '已索引') {
+          fileData.status = '已索引';
+          const fileItem = document.getElementById(`file-${fileData.id}`);
+          const statusEl = fileItem.querySelector('.text-blue-400, .text-green-400, .text-yellow-400');
+          statusEl.textContent = '已索引';
+          statusEl.className = 'text-green-400 w-16 text-center';
+        }
+      });
+      updateStats();
+      alert('索引构建完成');
+    });
+
+    // 清空全部
+    clearAllBtn.addEventListener('click', () => {
+      if (fileDataList.length === 0) return;
+      if (!confirm('确定要清空全部文档吗？')) return;
+      fileDataList = [];
+      fileList.innerHTML = '';
+      emptyState.style.display = 'flex';
+      updateStats();
+    });
+
+    // 更新统计
+    function updateStats() {
+      fileCountEl.textContent = fileDataList.length;
+      indexedCountEl.textContent = fileDataList.filter(item => item.status === '已索引').length;
+    }
+
+    // 工具：获取文件图标
+    function getFileIcon(fileName) {
+      const ext = fileName.toLowerCase().slice(-3);
+      if (ext === 'pdf') return 'fa-file-pdf-o';
+      if (ext === 'doc' || ext === 'docx') return 'fa-file-word-o';
+      if (ext === 'txt' || ext === 'md') return 'fa-file-text-o';
+      return 'fa-file-o';
+    }
+
+    // 工具：格式化文件大小
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+  </script>
+</body>
+</html>
