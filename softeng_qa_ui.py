@@ -371,124 +371,94 @@ def handle_search_progress_toggle(value):
     logger.info(f"检索进展显示已{'启用' if value else '禁用'}")
 
 
-# 自定义CSS样式
+# 自定义CSS样式 - 深色科技风（参考softeng.html设计）
 custom_css = """
-/* CSS自定义样式 - 简约时尚现代化专业科技风 */
 :root {
-    --primary: #6366f1;
-    --secondary: #8b5cf6;
-    --danger: #ef4444;
-    --danger-soft: #f87171;
-    --border-color: #e2e8f0;
-    --shadow: 0 1px 3px rgba(0,0,0,0.08);
-    --shadow-dark: 0 2px 8px rgba(0,0,0,0.2);
-    --shadow-light: 0 1px 3px rgba(0,0,0,0.1);
-    --radius: 8px;
-    --card-bg: #ffffff;
-    --text-primary: #1e293b;
-    --text-secondary: #64748b;
-    --text-muted: #94a3b8;
+    --primary: #8B5CF6;
+    --primary-light: #A78BFA;
+    --dark-bg: #0F172A;
+    --card-bg: #1E293B;
+    --accent-red: #EF4444;
+    --neutral-gray: #334155;
+    --border-color: rgba(139, 92, 246, 0.2);
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --radius: 12px;
+    --shadow-card: 0 4px 20px rgba(0,0,0,0.3);
+    --shadow-glow: 0 0 12px rgba(139, 92, 246, 0.25);
 }
 
-body { 
-    background-color: #f8fafc; 
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+body {
+    background-color: var(--dark-bg) !important;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
+    color: var(--text-primary);
 }
 
-h1 { 
-    color: #1f2937; 
-    font-size: 24px; 
-    font-weight: 600; 
-    margin: 0; 
-}
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #1E293B; border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: #8B5CF6; border-radius: 10px; }
 
-h2 { 
-    font-size: 16px; 
-    color: #6b7280; 
-    font-weight: 400; 
-    margin: 4px 0 0 0; 
-}
-
-h3 { 
-    color: var(--primary); 
-    font-size: 14px; 
-    font-weight: 600; 
-    margin: 0 0 12px 0; 
+h1 { color: var(--text-primary); font-size: 24px; font-weight: 600; margin: 0; }
+h2 { font-size: 16px; color: var(--text-secondary); font-weight: 400; margin: 4px 0 0 0; }
+h3 {
+    color: var(--primary-light);
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 12px 0;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border-color);
 }
+h4 { color: var(--text-primary); font-size: 13px; font-weight: 500; margin: 12px 0 8px 0; }
 
-h4 { 
-    color: #4b5563; 
-    font-size: 13px; 
-    font-weight: 500; 
-    margin: 12px 0 8px 0; 
-}
-
-/* 主容器样式 */
+/* 主容器 */
 .main-container {
     max-width: 1400px;
     margin: 0 auto;
     padding: 24px;
 }
 
-/* 顶部导航栏 - 56px高度，渐变背景 */
+/* 顶部导航栏 - 渐变紫 */
 .header-section {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
     color: white;
     height: 56px;
     padding: 0 24px;
     border-radius: var(--radius);
     margin-bottom: 16px;
-    box-shadow: 0 2px 12px rgba(99, 102, 241, 0.25);
+    box-shadow: var(--shadow-glow);
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
+.header-section h1 { color: white; font-size: 18px; font-weight: 700; margin: 0; }
+.header-section h2 { color: rgba(255,255,255,0.9); font-size: 13px; font-weight: 400; margin: 0; }
 
-.header-section h1 {
-    color: white;
-    font-size: 18px;
-    font-weight: 700;
-    margin: 0;
-}
-
-.header-section h2 {
-    color: rgba(255, 255, 255, 0.85);
-    font-size: 13px;
-    font-weight: 400;
-    margin: 0;
-}
-
-/* 卡片样式 */
+/* Glass 卡片 */
 .card {
-    background: var(--card-bg);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-light);
-    border: 1px solid var(--border-color);
-    padding: 16px;
+    background: linear-gradient(135deg, rgba(30,41,59,0.95), rgba(15,23,42,0.98)) !important;
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: var(--shadow-card) !important;
+    padding: 16px !important;
+    backdrop-filter: blur(8px);
 }
 
-/* 设置项样式 */
+/* 设置项 */
 .setting-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    background: var(--card-bg);
-    border-bottom: 1px solid var(--border-color);
+    gap: 2px;
+    padding: 10px 12px;
+    background: transparent;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.4);
     transition: all 0.2s ease;
 }
+.setting-item:last-child { border-bottom: none; }
+.setting-item:hover { background: rgba(139, 92, 246, 0.1); }
 
-.setting-item:last-child {
-    border-bottom: none;
-}
-
-.setting-item:hover {
-    background: rgba(99, 102, 241, 0.03);
-}
-
-/* Checkbox样式优化 */
+/* Checkbox */
 .gr-checkbox,
 .gr-checkbox-wrap,
 .checkbox-wrap,
@@ -502,7 +472,6 @@ h4 {
     height: 20px !important;
     transform: scale(1.1);
 }
-
 .gr-checkbox label,
 .gr-checkbox-wrap label,
 .checkbox-wrap label,
@@ -518,7 +487,6 @@ h4 {
     padding: 0 !important;
     margin: 0 !important;
 }
-
 .gr-checkbox input[type="checkbox"],
 input[type="checkbox"] {
     width: 18px !important;
@@ -529,35 +497,13 @@ input[type="checkbox"] {
     margin: 0 !important;
 }
 
-/* 设置内容区域 */
-.setting-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
+/* 设置内容 */
+.setting-content { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.setting-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.setting-title span { font-size: 16px; }
+.setting-desc { font-size: 11px; font-weight: 400; color: var(--text-secondary); padding-left: 0; margin-top: 1px; }
 
-.setting-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.setting-title span {
-    font-size: 16px;
-}
-
-.setting-desc {
-    font-size: 12px;
-    font-weight: 400;
-    color: var(--text-secondary);
-    padding-left: 24px;
-}
-
-/* 卡片头部样式 */
+/* 卡片头部 */
 .card-header {
     padding: 12px 16px;
     font-size: 14px;
@@ -565,95 +511,56 @@ input[type="checkbox"] {
     color: var(--text-primary);
     border-bottom: 1px solid var(--border-color);
 }
+.card-header h3 { margin: 0; font-size: 14px; font-weight: 500; color: var(--primary-light); border-bottom: none; padding-bottom: 0; }
 
-.card-header h3 {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--primary);
-    border-bottom: none;
-    padding-bottom: 0;
-}
-
-/* 示例问题卡片样式 */
+/* 示例问题卡片 */
 .examples-card {
-    background: var(--card-bg);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-light);
+    background: linear-gradient(135deg, rgba(30,41,59,0.95), rgba(15,23,42,0.98)) !important;
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: var(--shadow-card) !important;
     padding: 16px;
     margin-top: 16px;
-    border: 1px solid var(--border-color);
 }
+.examples-card h3 { margin: 0 0 12px 0; font-size: 14px; font-weight: 500; color: var(--primary-light); border-bottom: none; padding-bottom: 0; }
 
-.examples-card h3 {
-    margin: 0 0 12px 0;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--primary);
-    border-bottom: none;
-    padding-bottom: 0;
-}
-
-/* 示例问题标签样式 */
+/* 示例问题标签 */
 .examples-card button,
 .examples-card .gr-button,
 .examples-card input[type="button"] {
-    background: var(--card-bg) !important;
+    background: rgba(51, 65, 85, 0.4) !important;
     color: var(--text-secondary) !important;
-    border: 1px solid var(--border-color) !important;
+    border: 1px solid rgba(139, 92, 246, 0.15) !important;
     border-radius: 6px !important;
     font-size: 13px !important;
     font-weight: 400 !important;
-    padding: 8px 12px !important;
+    padding: 8px 14px !important;
     margin: 4px !important;
-    transition: all 0.2s ease !important;
+    transition: all 0.25s ease !important;
     cursor: pointer !important;
 }
-
 .examples-card button:hover,
 .examples-card .gr-button:hover,
 .examples-card input[type="button"]:hover {
-    background: rgba(99, 102, 241, 0.08) !important;
-    color: var(--primary) !important;
+    background: rgba(139, 92, 246, 0.25) !important;
+    color: var(--primary-light) !important;
     border-color: var(--primary) !important;
 }
 
-/* 聊天消息样式 */
-.message {
-    margin: 12px 0;
-    padding: 12px 16px;
-    border-radius: 12px;
-    max-width: 85%;
-}
-
-.user-message {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    margin-left: auto;
-    border-radius: 12px 12px 4px 12px;
-}
-
-.assistant-message {
-    background: rgba(99, 102, 241, 0.08);
-    color: var(--text-primary);
-    margin-right: auto;
-    border-radius: 12px 12px 12px 4px;
-}
-
-/* 状态显示样式 */
+/* 状态显示 */
 .status-display {
-    color: var(--primary);
+    color: var(--primary-light) !important;
     font-size: 13px;
-    padding: 8px 16px;
-    background-color: rgba(99, 102, 241, 0.08);
+    padding: 10px 16px;
+    background: rgba(139, 92, 246, 0.1) !important;
     border-radius: 8px;
-    border: 1px solid rgba(99, 102, 241, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.2);
     font-family: 'SF Mono', Monaco, 'Courier New', monospace;
 }
 
-/* 进度显示样式 */
+/* 进度显示 */
 .progress-display {
-    background: rgba(0, 0, 0, 0.03);
+    background: rgba(0,0,0,0.2) !important;
     border-radius: 8px;
     padding: 12px;
     font-size: 12px;
@@ -664,161 +571,119 @@ input[type="checkbox"] {
     border: 1px solid var(--border-color);
 }
 
-/* 按钮样式 - 统一高度40px */
-.btn-primary {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%) !important;
+/* 主按钮 - 渐变紫 */
+.btn-primary, button.primary, .gr-button.primary {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%) !important;
     color: white !important;
     border: none !important;
     font-weight: 500 !important;
     border-radius: var(--radius) !important;
-    height: 40px !important;
+    height: 42px !important;
     min-width: 120px !important;
-    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25) !important;
-    transition: all 0.2s ease !important;
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.25) !important;
+    transition: all 0.25s ease !important;
+}
+.btn-primary:hover, button.primary:hover, .gr-button.primary:hover {
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4) !important;
+    transform: translateY(-2px) !important;
 }
 
-.btn-primary:hover {
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35) !important;
-    transform: translateY(-1px);
-}
-
-/* 清空输入按钮 */
+/* 次级按钮 */
 .btn-secondary {
-    background: var(--card-bg) !important;
+    background: rgba(51, 65, 85, 0.5) !important;
     color: var(--text-primary) !important;
     border: 1px solid var(--border-color) !important;
     border-radius: var(--radius) !important;
-    height: 40px !important;
-    transition: all 0.2s ease !important;
+    height: 42px !important;
+    transition: all 0.25s ease !important;
 }
-
 .btn-secondary:hover {
-    background: rgba(0, 0, 0, 0.05) !important;
-    border-color: #cbd5e1 !important;
+    background: rgba(139, 92, 246, 0.2) !important;
+    border-color: var(--primary) !important;
 }
 
-/* 清空历史按钮 - 柔和红色 */
+/* 危险按钮 - 柔和红 */
 .btn-danger {
-    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;
+    background: linear-gradient(135deg, #f87171 0%, var(--accent-red) 100%) !important;
     color: white !important;
     border: none !important;
     border-radius: var(--radius) !important;
-    height: 40px !important;
-    transition: all 0.2s ease !important;
+    height: 42px !important;
+    transition: all 0.25s ease !important;
 }
-
 .btn-danger:hover {
     background: linear-gradient(135deg, #fca5a5 0%, #f87171 100%) !important;
-    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25) !important;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3) !important;
+    transform: translateY(-2px) !important;
 }
 
-/* 标签页样式 */
+/* 标签页 */
 .gr-tab {
     font-weight: 500 !important;
+    color: var(--text-secondary) !important;
+    border-bottom: 2px solid transparent !important;
+    transition: all 0.2s !important;
+}
+.gr-tab:hover { color: var(--primary-light) !important; }
+.gr-tab.selected {
+    color: var(--primary-light) !important;
+    border-bottom-color: var(--primary) !important;
 }
 
-.gr-tab:focus {
-    box-shadow: none !important;
-}
-
-/* 输入框样式 */
-.gr-input {
+/* 输入框 */
+.gr-input, input[type="text"], .gr-text-input {
     border-radius: var(--radius) !important;
     border: 1px solid var(--border-color) !important;
     padding: 12px 16px !important;
+    background: rgba(51, 65, 85, 0.3) !important;
+    color: var(--text-primary) !important;
 }
-
-.gr-input:focus {
+.gr-input:focus, input[type="text"]:focus, .gr-text-input:focus {
     border-color: var(--primary) !important;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
-}
-
-/* 下拉选择样式 */
-.gr-dropdown {
-    border-radius: var(--radius) !important;
-    border: 1px solid var(--border-color) !important;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15) !important;
 }
 
 /* 聊天历史区域 */
 .chat-history {
-    background: var(--card-bg);
+    background: rgba(15, 23, 42, 0.6) !important;
     border-radius: var(--radius);
     border: 1px solid var(--border-color);
 }
 
-/* 深色模式适配 */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --border-color: #334155;
-        --card-bg: #1e293b;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --text-muted: #64748b;
-    }
-    
-    body {
-        background-color: #0f172a;
-    }
-    
-    h1 {
-        color: #f1f5f9;
-    }
-    
-    h2 {
-        color: #94a3b8;
-    }
-    
-    h4 {
-        color: #cbd5e1;
-    }
-    
-    .card {
-        box-shadow: var(--shadow-dark);
-    }
-    
-    .examples-card {
-        box-shadow: var(--shadow-dark);
-    }
-    
-    .setting-item:hover {
-        background: rgba(255, 255, 255, 0.03);
-    }
-    
-    .assistant-message {
-        background: rgba(255, 255, 255, 0.05);
-    }
-    
-    .progress-display {
-        background: rgba(255, 255, 255, 0.03);
-    }
-    
-    .btn-secondary {
-        background: #334155 !important;
-        color: #f1f5f9 !important;
-    }
-    
-    .btn-secondary:hover {
-        background: #475569 !important;
-    }
-    
-    .examples-card button,
-    .examples-card .gr-button,
-    .examples-card input[type="button"] {
-        background: #334155 !important;
-        color: #94a3b8 !important;
-        border-color: #475569 !important;
-    }
-    
-    .examples-card button:hover,
-    .examples-card .gr-button:hover,
-    .examples-card input[type="button"]:hover {
-        background: rgba(99, 102, 241, 0.15) !important;
-        color: #c7d2fe !important;
-    }
-    
-    .header-section h2 {
-        color: rgba(255, 255, 255, 0.7);
-    }
+/* Gradio内部容器覆写 */
+.gradio-container, .gradio-container-outer {
+    background: transparent !important;
+}
+
+.gr-box, .gr-form, .container {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.gr-panel, .panel {
+    border: none !important;
+    background: transparent !important;
+}
+
+/* Bot消息覆写 */
+.bot-message, .assistant-message {
+    background: rgba(139, 92, 246, 0.08) !important;
+}
+.user-message {
+    background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%) !important;
+    color: white !important;
+}
+
+/* 文件上传区域 */
+.gr-file, .file-preview {
+    background: rgba(51, 65, 85, 0.3) !important;
+    border: 2px dashed rgba(139, 92, 246, 0.4) !important;
+    border-radius: var(--radius) !important;
+}
+.gr-file:hover, .file-preview:hover {
+    border-color: var(--primary) !important;
+    background: rgba(139, 92, 246, 0.1) !important;
 }
 """
 
@@ -826,6 +691,7 @@ input[type="checkbox"] {
 def create_ui():
     with gr.Blocks() as app:
         gr.HTML("""
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <div class="main-container">
             <div class="header-section">
                 <h1>🎓 软件工程课程助手</h1>
@@ -1057,6 +923,35 @@ if __name__ == "__main__":
         app.queue()
         app.launch(
             share=True,
-            theme=gr.themes.Soft(),
+            theme=gr.themes.Base(
+                primary_hue=gr.themes.Color(
+                    c50="#F5F3FF",
+                    c100="#EDE9FE",
+                    c200="#DDD6FE",
+                    c300="#C4B5FD",
+                    c400="#A78BFA",
+                    c500="#8B5CF6",
+                    c600="#7C3AED",
+                    c700="#6D28D9",
+                    c800="#5B21B6",
+                    c900="#4C1D95",
+                    c950="#2E1065",
+                ),
+                neutral_hue=gr.themes.Color(
+                    c50="#F8FAFC",
+                    c100="#F1F5F9",
+                    c200="#E2E8F0",
+                    c300="#CBD5E1",
+                    c400="#94A3B8",
+                    c500="#64748B",
+                    c600="#475569",
+                    c700="#334155",
+                    c800="#1E293B",
+                    c900="#0F172A",
+                    c950="#020617",
+                ),
+                spacing_size=gr.themes.sizes.spacing_md,
+                radius_size=gr.themes.sizes.radius_md,
+            ),
             css=custom_css
         )
