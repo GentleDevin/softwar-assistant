@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
+import os
 import time
 import traceback
 from typing import List
+
+# 设置环境变量解决OpenMP重复初始化问题 - 必须在导入其他库之前设置
+os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+os.environ.setdefault('OMP_NUM_THREADS', '1')
 
 import gradio as gr
 
@@ -115,17 +120,20 @@ def answer_question_ui(question: str, chat_history,
                        multi_hop_enabled, search_progress_enabled):
     """处理问题并更新对话历史，支持多种功能开关"""
     global QA_SYSTEM_INIT_ERROR
+    
+    # 检查系统初始化状态
     if 'QA_SYSTEM_INIT_ERROR' in globals() and QA_SYSTEM_INIT_ERROR:
         error_msg = f"系统错误：{QA_SYSTEM_INIT_ERROR}"
         yield chat_history, error_msg, error_msg, "", ""
         return
 
+    # 检查输入问题
+    if not question or question.strip() == "":
+        yield chat_history, "", "", "", ""
+        return
+
     try:
         qa_system = get_qa_system_instance()
-
-        if not question or question.strip() == "":
-            yield chat_history, "", "", "", ""
-            return
 
         logger.info(f"UI: Answering question: '{question}'")
         logger.info(f"UI: Web search enabled: {web_search_enabled}")
@@ -134,20 +142,16 @@ def answer_question_ui(question: str, chat_history,
         logger.info(f"UI: Search progress enabled: {search_progress_enabled}")
 
         start_time = time.time()
-        current_triples = ""
-        current_docs = ""
         progress_messages = []
+        steps = ["正在分析问题...", "正在提取实体...", "正在检索知识图谱...", 
+                 "正在搜索文档...", "正在生成回答..."]
+        step_start_times = []  # 记录每个步骤的开始时间
         
+        # 创建一个线程来执行问答处理
         import threading
-        result_container = {
-            'done': False,
-            'response': None,
-            'triples': None,
-            'docs': None,
-            'error': None
-        }
+        import queue
         
-        MAX_TIMEOUT = 240  # 最大超时时间（秒）- 4分钟，包含KG查询(30s) + RAG搜索(30s) + LLM调用(60-120s)
+        result_queue = queue.Queue()
         
         def do_work():
             try:
@@ -163,69 +167,79 @@ def answer_question_ui(question: str, chat_history,
                 rag_manager = qa_system.rag_manager
                 search_output_html = rag_manager.format_search_results_as_html(doc_results_raw)
                 
-                result_container['response'] = response
-                result_container['triples'] = triples_html
-                result_container['docs'] = search_output_html
+                result_queue.put({
+                    'success': True,
+                    'response': response,
+                    'triples': triples_html,
+                    'docs': search_output_html
+                })
             except Exception as e:
-                result_container['error'] = str(e)
-                logger.error(f"UI: Question processing error: {e}")
-                logger.debug(traceback.format_exc())
-            finally:
-                result_container['done'] = True
+                result_queue.put({
+                    'success': False,
+                    'error': str(e)
+                })
         
+        # 启动工作线程
         thread = threading.Thread(target=do_work)
+        thread.daemon = True
         thread.start()
         
-        # 实时更新进度显示
-        step_count = 0
-        steps = ["正在分析问题...", "正在提取实体...", "正在检索知识图谱...", 
-                 "正在搜索文档...", "正在生成回答..."]
-        last_step = -1  # 记录上一次添加的步骤索引
+        # 在等待结果的同时更新进度显示
+        current_step = 0
+        max_steps = len(steps)
         
-        while not result_container['done']:
+        while thread.is_alive():
             elapsed = time.time() - start_time
             
-            # 检查超时
-            if elapsed >= MAX_TIMEOUT:
-                error_msg = f"请求超时！处理时间超过 {MAX_TIMEOUT} 秒，请稍后重试或简化问题。"
-                logger.error(f"UI: Request timeout after {MAX_TIMEOUT}s")
-                yield chat_history, "<p>请求超时</p>", "<p>请求超时</p>", error_msg, f"[{time.strftime('%H:%M:%S')}] 请求超时"
-                return
-            
-            if search_progress_enabled:
-                current_step_idx = min(step_count, len(steps)-1)
-                # 只有当步骤发生变化时才添加新的进度消息
-                if current_step_idx != last_step:
-                    step = steps[current_step_idx]
-                    progress_messages.append(f"[{time.strftime('%H:%M:%S')}] {step}")
-                    if len(progress_messages) > 10:
-                        progress_messages.pop(0)
-                    last_step = current_step_idx
+            # 更新进度步骤
+            progress_html = ""
+            if search_progress_enabled and current_step < max_steps:
+                step_to_show = min(current_step, max_steps - 1)
+                step_start_times.append(time.time())
+                # 立即显示步骤和时间（从0开始）
+                progress_messages.append(f"{steps[step_to_show]} (0.00s)")
+                progress_messages = progress_messages[-10:]  # 最多保留10条
                 progress_html = "<br>".join(progress_messages)
-            else:
-                progress_html = ""
+                current_step += 1
+            elif search_progress_enabled and progress_messages:
+                # 更新所有步骤的耗时显示
+                updated_messages = []
+                for i, msg in enumerate(progress_messages):
+                    if i < len(step_start_times) - 1:
+                        # 已完成的步骤，显示最终耗时
+                        step_elapsed = step_start_times[i+1] - step_start_times[i]
+                        updated_messages.append(f"{steps[i]} ({step_elapsed:.2f}s)")
+                    elif i == len(step_start_times) - 1:
+                        # 当前正在执行的步骤，显示实时耗时
+                        step_elapsed = time.time() - step_start_times[i]
+                        updated_messages.append(f"{steps[i]} ({step_elapsed:.2f}s)")
+                    else:
+                        updated_messages.append(msg)
+                progress_html = "<br>".join(updated_messages)
             
+            # 更新 status_display（时间进度）和 progress_output（步骤信息）
             status = f"processing | {elapsed:.1f}s"
-            yield chat_history, current_triples, current_docs, status, progress_html
+            yield chat_history, "", "", status, progress_html
             
-            step_count += 1
-            time.sleep(0.5)
+            # 等待一小段时间再检查
+            time.sleep(0.3)
         
-        thread.join()
+        # 获取处理结果
+        result = result_queue.get(timeout=5)
         
-        # 检查是否有错误
-        if result_container['error']:
-            error_msg = f"处理问题时发生错误: {result_container['error']}"
+        if not result['success']:
+            error_msg = f"处理问题时发生错误: {result['error']}"
             logger.error(error_msg)
-            yield chat_history, f"<p>处理时出错: {result_container['error']}</p>", f"<p>处理时出错: {result_container['error']}</p>", error_msg, ""
+            yield chat_history, f"<p>处理时出错: {result['error']}</p>", f"<p>处理时出错: {result['error']}</p>", error_msg, ""
             return
         
         total_time = time.time() - start_time
         
-        response = result_container['response']
-        final_triples = result_container['triples']
-        final_docs = result_container['docs']
+        response = result['response']
+        triples_html = result['triples']
+        search_output_html = result['docs']
         
+        # 解析响应
         if isinstance(response, dict):
             answer = response.get("answer", "未能获取答案")
             agent_name = response.get("agent_name", "未知智能体")
@@ -241,27 +255,38 @@ def answer_question_ui(question: str, chat_history,
         
         formatted_answer = f"{agent_info_html}\n\n{answer}"
 
+        # 更新对话历史
         try:
             new_history = chat_history if chat_history else []
             new_history = new_history + [
                 {"role": "user", "content": question},
                 {"role": "assistant", "content": formatted_answer}
             ]
-        except:
+        except Exception as e:
+            logger.warning(f"Failed to format chat history: {e}")
             new_history = chat_history if chat_history else []
             new_history = new_history + [[question, formatted_answer]]
 
         final_status = f"响应完成 | 总耗时: {total_time:.2f}秒"
         
-        # 添加最终进度信息
-        if search_progress_enabled:
-            progress_messages.append(f"[{time.strftime('%H:%M:%S')}] 回答生成完成")
-            progress_html = "<br>".join(progress_messages)
+        # 保留检索进展信息，不清空
+        if search_progress_enabled and progress_messages:
+            # 计算最终的步骤耗时
+            final_progress_messages = []
+            for i, msg in enumerate(progress_messages):
+                if i < len(step_start_times) - 1:
+                    step_elapsed = step_start_times[i+1] - step_start_times[i]
+                    final_progress_messages.append(f"{steps[i]} ({step_elapsed:.2f}s)")
+                elif i == len(step_start_times) - 1:
+                    # 最后一个步骤的耗时（到完成）
+                    step_elapsed = time.time() - step_start_times[i]
+                    final_progress_messages.append(f"{steps[i]} ({step_elapsed:.2f}s)")
+            progress_html = "<br>".join(final_progress_messages)
         else:
             progress_html = ""
         
         logger.info(f"UI: Answer and contexts retrieved. 耗时: {total_time:.3f}s")
-        yield new_history, final_triples, final_docs, final_status, progress_html
+        yield new_history, triples_html, search_output_html, final_status, progress_html
 
     except RuntimeError as e:
         error_msg = f"系统错误: {str(e)}"
@@ -271,7 +296,7 @@ def answer_question_ui(question: str, chat_history,
         error_msg = f"处理问题时发生意外错误: {str(e)}"
         logger.error(error_msg)
         logger.debug(traceback.format_exc())
-        yield chat_history, f"<p>处理时出错: {e}</p>", f"<p>处理时出错: {e}</p>", error_msg, ""
+        yield chat_history, f"<p>处理时出错: {str(e)}</p>", f"<p>处理时出错: {str(e)}</p>", error_msg, ""
 
 
 def format_as_table(answer: str) -> str:
