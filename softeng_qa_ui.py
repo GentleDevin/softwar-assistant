@@ -109,9 +109,9 @@ def format_agent_info_html(agent_name: str) -> str:
     icon = agent_icons.get(agent_name, "🔍")
     description = agent_descriptions.get(agent_name, "提供软件工程相关回答")
     
-    return f"""<div style="background-color: #f5f9ff; border-left: 4px solid #2a81e3; padding: 8px 12px; margin: 8px 0; border-radius: 0 8px 8px 0;">
-<span style="font-size: 1.2em;">{icon}</span> <strong style="color: #2a81e3;">{agent_name}</strong>
-<div style="color: #555; font-size: 0.9em; margin-top: 4px;">{description}</div>
+    return f"""<div style="background: rgba(30,41,59,0.9); border-left: 4px solid #8B5CF6; padding: 8px 14px; margin: 6px 0 10px 0; border-radius: 0 8px 8px 0; border-top: 1px solid rgba(139,92,246,0.2); border-bottom: 1px solid rgba(139,92,246,0.2); border-right: 1px solid rgba(139,92,246,0.1);">
+<span style="font-size: 1.1em; vertical-align: middle;">{icon}</span>&nbsp;<strong style="color: #A78BFA; font-size: 13px; vertical-align: middle;">{agent_name}</strong>
+<div style="color: #94A3B8; font-size: 11.5px; margin-top: 3px; line-height: 1.5;">{description}</div>
 </div>"""
 
 
@@ -315,11 +315,12 @@ def format_as_table(answer: str) -> str:
                 table_rows.append(match.group(1))
         
         if len(table_rows) >= 2:
-            table_html = "<table style='width:100%; border-collapse:collapse; margin:10px 0;'>"
-            table_html += "<thead><tr><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>序号</th><th style='border:1px solid #ddd; padding:8px; background-color:#f5f9ff; text-align:left;'>内容</th></tr></thead>"
+            table_html = "<table style='width:100%; border-collapse:collapse; margin:10px 0; font-size:13px;'>"
+            table_html += "<thead><tr><th style='border:1px solid rgba(139,92,246,0.2); padding:8px 12px; background:rgba(139,92,246,0.15); text-align:left; color:#A78BFA; font-weight:600;'>序号</th><th style='border:1px solid rgba(139,92,246,0.2); padding:8px 12px; background:rgba(139,92,246,0.15); text-align:left; color:#A78BFA; font-weight:600;'>内容</th></tr></thead>"
             table_html += "<tbody>"
             for i, row in enumerate(table_rows, 1):
-                table_html += f"<tr><td style='border:1px solid #ddd; padding:8px;'>{i}</td><td style='border:1px solid #ddd; padding:8px;'>{row}</td></tr>"
+                bg = "rgba(30,41,59,0.5)" if i % 2 == 0 else "transparent"
+                table_html += f"<tr style='background:{bg};'><td style='border:1px solid rgba(51,65,85,0.5); padding:8px 12px; color:#94A3B8; width:48px;'>{i}</td><td style='border:1px solid rgba(51,65,85,0.5); padding:8px 12px; color:#E2E8F0;'>{row}</td></tr>"
             table_html += "</tbody></table>"
             return table_html
         
@@ -371,94 +372,164 @@ def handle_search_progress_toggle(value):
     logger.info(f"检索进展显示已{'启用' if value else '禁用'}")
 
 
-# 自定义CSS样式 - 深色科技风（参考softeng.html设计）
+# 自定义CSS样式 - 深色科技风（参考softeng.html设计，强制暗色模式，不随Mac系统主题变化）
 custom_css = """
+/* ============================================================
+   强制暗色模式 - 不随 macOS 系统主题变化
+   ============================================================ */
 :root {
+    color-scheme: dark !important;
     --primary: #8B5CF6;
     --primary-light: #A78BFA;
+    --primary-dark: #7C3AED;
     --dark-bg: #0F172A;
     --card-bg: #1E293B;
     --accent-red: #EF4444;
     --neutral-gray: #334155;
     --border-color: rgba(139, 92, 246, 0.2);
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+    --border-subtle: rgba(51, 65, 85, 0.5);
+    --text-primary: #F1F5F9;
+    --text-secondary: #94A3B8;
+    --text-muted: #64748B;
     --radius: 12px;
-    --shadow-card: 0 4px 20px rgba(0,0,0,0.3);
-    --shadow-glow: 0 0 12px rgba(139, 92, 246, 0.25);
+    --radius-sm: 8px;
+    --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+    --shadow-glow: 0 0 16px rgba(139, 92, 246, 0.3);
+    --transition: all 0.25s ease;
 }
 
-body {
-    background-color: var(--dark-bg) !important;
-    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
-    color: var(--text-primary);
+/* ── 全局基础 ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+    background-color: #0F172A !important;
+    color: #F1F5F9 !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
 }
 
-/* 滚动条美化 */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+/* ── 滚动条 ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: #1E293B; border-radius: 10px; }
-::-webkit-scrollbar-thumb { background: #8B5CF6; border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #8B5CF6; }
 
-h1 { color: var(--text-primary); font-size: 24px; font-weight: 600; margin: 0; }
-h2 { font-size: 16px; color: var(--text-secondary); font-weight: 400; margin: 4px 0 0 0; }
-h3 {
-    color: var(--primary-light);
-    font-size: 14px;
-    font-weight: 600;
-    margin: 0 0 12px 0;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-color);
-}
-h4 { color: var(--text-primary); font-size: 13px; font-weight: 500; margin: 12px 0 8px 0; }
-
-/* 主容器 */
-.main-container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 24px;
+/* ── Gradio 根容器强制暗色 ── */
+.gradio-container,
+.gradio-container-outer,
+.wrap,
+#root,
+.app {
+    background: #0F172A !important;
+    color: #F1F5F9 !important;
+    min-height: 100vh !important;
 }
 
-/* 顶部导航栏 - 渐变紫 */
+/* 清除默认白底 */
+.gr-box,
+.gr-form,
+.gr-panel,
+.panel,
+.container,
+.block,
+.block.padded,
+.block.label-inner,
+.wrap.svelte-xgdnc5,
+.overflow-hidden {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: #F1F5F9 !important;
+}
+
+/* ── 顶部导航栏 ── */
 .header-section {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-    color: white;
-    height: 56px;
-    padding: 0 24px;
-    border-radius: var(--radius);
-    margin-bottom: 16px;
-    box-shadow: var(--shadow-glow);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    background: linear-gradient(135deg, #7C3AED 0%, #8B5CF6 50%, #A78BFA 100%) !important;
+    color: #fff !important;
+    border-radius: var(--radius) !important;
+    padding: 14px 24px !important;
+    margin-bottom: 16px !important;
+    box-shadow: var(--shadow-glow) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    border: 1px solid rgba(167, 139, 250, 0.3) !important;
 }
-.header-section h1 { color: white; font-size: 18px; font-weight: 700; margin: 0; }
-.header-section h2 { color: rgba(255,255,255,0.9); font-size: 13px; font-weight: 400; margin: 0; }
+.header-section h1 {
+    color: #fff !important;
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    letter-spacing: -0.3px;
+}
+.header-section h2 {
+    color: rgba(255,255,255,0.85) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    margin: 0 !important;
+    letter-spacing: 0.2px;
+}
 
-/* Glass 卡片 */
+/* ── 玻璃卡片 ── */
 .card {
-    background: linear-gradient(135deg, rgba(30,41,59,0.95), rgba(15,23,42,0.98)) !important;
+    background: linear-gradient(135deg, rgba(30,41,59,0.96), rgba(15,23,42,0.98)) !important;
     border-radius: var(--radius) !important;
     border: 1px solid var(--border-color) !important;
     box-shadow: var(--shadow-card) !important;
     padding: 16px !important;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
 }
 
-/* 设置项 */
+/* ── 卡片头部 ── */
+.card-header {
+    display: flex;
+    align-items: center;
+    padding: 0 0 12px 0;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+.card-header h3 {
+    margin: 0 !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #A78BFA !important;
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+}
+
+/* ── 设置项行 ── */
 .setting-item {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 10px 12px;
-    background: transparent;
-    border-bottom: 1px solid rgba(51, 65, 85, 0.4);
-    transition: all 0.2s ease;
+    gap: 10px;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background 0.2s ease;
+    border-radius: 6px;
 }
 .setting-item:last-child { border-bottom: none; }
-.setting-item:hover { background: rgba(139, 92, 246, 0.1); }
+.setting-item:hover { background: rgba(139, 92, 246, 0.08); padding-left: 8px; }
 
-/* Checkbox */
+.setting-content { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.setting-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: #F1F5F9;
+}
+.setting-title span { font-size: 15px; line-height: 1; }
+.setting-desc {
+    font-size: 11px;
+    color: #64748B;
+    line-height: 1.4;
+    padding-left: 0;
+}
+
+/* ── Checkbox 样式 ── */
 .gr-checkbox,
 .gr-checkbox-wrap,
 .checkbox-wrap,
@@ -468,9 +539,8 @@ h4 { color: var(--text-primary); font-size: 13px; font-weight: 500; margin: 12px
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    width: 20px !important;
-    height: 20px !important;
-    transform: scale(1.1);
+    width: 22px !important;
+    height: 22px !important;
 }
 .gr-checkbox label,
 .gr-checkbox-wrap label,
@@ -486,204 +556,286 @@ h4 { color: var(--text-primary); font-size: 13px; font-weight: 500; margin: 12px
     width: 0 !important;
     padding: 0 !important;
     margin: 0 !important;
+    overflow: hidden !important;
 }
-.gr-checkbox input[type="checkbox"],
 input[type="checkbox"] {
-    width: 18px !important;
-    height: 18px !important;
-    cursor: pointer;
-    accent-color: var(--primary);
-    border-radius: 4px;
+    width: 16px !important;
+    height: 16px !important;
+    cursor: pointer !important;
+    accent-color: #8B5CF6 !important;
+    border-radius: 4px !important;
+    margin: 0 !important;
+    flex-shrink: 0 !important;
+}
+
+/* ── 标签页 ── */
+.tabs > .tab-nav {
+    background: rgba(15,23,42,0.8) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    padding: 0 4px !important;
+}
+.tabs > .tab-nav button {
+    color: #94A3B8 !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    padding: 10px 20px !important;
+    border-bottom: 2px solid transparent !important;
+    transition: var(--transition) !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+}
+.tabs > .tab-nav button:hover { color: #A78BFA !important; }
+.tabs > .tab-nav button.selected {
+    color: #A78BFA !important;
+    border-bottom-color: #8B5CF6 !important;
+    background: transparent !important;
+}
+
+/* ── 输入框 ── */
+textarea,
+input[type="text"],
+.gr-text-input,
+.gr-input {
+    background: rgba(30, 41, 59, 0.8) !important;
+    border: 1px solid rgba(139, 92, 246, 0.25) !important;
+    border-radius: var(--radius-sm) !important;
+    color: #F1F5F9 !important;
+    padding: 10px 14px !important;
+    font-size: 14px !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+    caret-color: #A78BFA !important;
+}
+textarea:focus,
+input[type="text"]:focus {
+    border-color: #8B5CF6 !important;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18) !important;
+    outline: none !important;
+}
+textarea::placeholder,
+input[type="text"]::placeholder { color: #475569 !important; }
+
+/* ── 主按钮（提交） ── */
+.btn-primary,
+button.primary,
+.gr-button.primary {
+    background: linear-gradient(135deg, #7C3AED 0%, #8B5CF6 60%, #A78BFA 100%) !important;
+    color: #fff !important;
+    border: none !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    border-radius: var(--radius-sm) !important;
+    height: 42px !important;
+    min-width: 110px !important;
+    box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3) !important;
+    transition: var(--transition) !important;
+    letter-spacing: 0.2px;
+}
+.btn-primary:hover,
+button.primary:hover,
+.gr-button.primary:hover {
+    box-shadow: 0 6px 22px rgba(139, 92, 246, 0.5) !important;
+    transform: translateY(-2px) !important;
+    filter: brightness(1.1) !important;
+}
+
+/* ── 次级按钮 ── */
+.btn-secondary,
+.btn-secondary:not(.primary) {
+    background: rgba(51, 65, 85, 0.6) !important;
+    color: #CBD5E1 !important;
+    border: 1px solid rgba(51, 65, 85, 0.8) !important;
+    border-radius: var(--radius-sm) !important;
+    height: 40px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    transition: var(--transition) !important;
+}
+.btn-secondary:hover {
+    background: rgba(139, 92, 246, 0.18) !important;
+    border-color: rgba(139, 92, 246, 0.5) !important;
+    color: #A78BFA !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ── 危险按钮（清空对话） ── */
+.btn-danger {
+    background: linear-gradient(135deg, #B91C1C 0%, #EF4444 100%) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: var(--radius-sm) !important;
+    height: 40px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    transition: var(--transition) !important;
+    box-shadow: 0 2px 8px rgba(239,68,68,0.2) !important;
+}
+.btn-danger:hover {
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4) !important;
+    transform: translateY(-1px) !important;
+    filter: brightness(1.1) !important;
+}
+
+/* ── 状态显示 ── */
+.status-display p,
+.status-display {
+    color: #A78BFA !important;
+    font-size: 12.5px !important;
+    font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', Monaco, monospace !important;
+    background: rgba(139, 92, 246, 0.08) !important;
+    border: 1px solid rgba(139, 92, 246, 0.2) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 8px 14px !important;
     margin: 0 !important;
 }
 
-/* 设置内容 */
-.setting-content { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.setting-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--text-primary); }
-.setting-title span { font-size: 16px; }
-.setting-desc { font-size: 11px; font-weight: 400; color: var(--text-secondary); padding-left: 0; margin-top: 1px; }
-
-/* 卡片头部 */
-.card-header {
-    padding: 12px 16px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-primary);
-    border-bottom: 1px solid var(--border-color);
+/* ── 进度显示 ── */
+.progress-display {
+    background: rgba(0, 0, 0, 0.25) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 10px 12px !important;
+    font-size: 12px !important;
+    color: #94A3B8 !important;
+    font-family: 'SF Mono', Monaco, monospace !important;
+    max-height: 140px !important;
+    overflow-y: auto !important;
+    border: 1px solid var(--border-color) !important;
+    line-height: 1.7 !important;
 }
-.card-header h3 { margin: 0; font-size: 14px; font-weight: 500; color: var(--primary-light); border-bottom: none; padding-bottom: 0; }
 
-/* 示例问题卡片 */
+/* ── 示例问题卡片 ── */
 .examples-card {
-    background: linear-gradient(135deg, rgba(30,41,59,0.95), rgba(15,23,42,0.98)) !important;
+    background: linear-gradient(135deg, rgba(30,41,59,0.96), rgba(15,23,42,0.98)) !important;
     border-radius: var(--radius) !important;
     border: 1px solid var(--border-color) !important;
     box-shadow: var(--shadow-card) !important;
-    padding: 16px;
-    margin-top: 16px;
+    padding: 16px !important;
+    margin-top: 12px !important;
 }
-.examples-card h3 { margin: 0 0 12px 0; font-size: 14px; font-weight: 500; color: var(--primary-light); border-bottom: none; padding-bottom: 0; }
-
-/* 示例问题标签 */
-.examples-card button,
-.examples-card .gr-button,
-.examples-card input[type="button"] {
-    background: rgba(51, 65, 85, 0.4) !important;
-    color: var(--text-secondary) !important;
-    border: 1px solid rgba(139, 92, 246, 0.15) !important;
-    border-radius: 6px !important;
+.examples-card h3 {
+    margin: 0 0 10px 0 !important;
     font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #A78BFA !important;
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+}
+.examples-card table,
+.examples-card .examples {
+    background: transparent !important;
+    border: none !important;
+}
+.examples-card button,
+.examples-card .gr-button {
+    background: rgba(51, 65, 85, 0.45) !important;
+    color: #94A3B8 !important;
+    border: 1px solid rgba(139, 92, 246, 0.15) !important;
+    border-radius: 20px !important;
+    font-size: 12px !important;
     font-weight: 400 !important;
-    padding: 8px 14px !important;
-    margin: 4px !important;
-    transition: all 0.25s ease !important;
+    padding: 5px 14px !important;
+    margin: 3px !important;
+    transition: var(--transition) !important;
     cursor: pointer !important;
+    white-space: nowrap !important;
 }
 .examples-card button:hover,
-.examples-card .gr-button:hover,
-.examples-card input[type="button"]:hover {
-    background: rgba(139, 92, 246, 0.25) !important;
-    color: var(--primary-light) !important;
-    border-color: var(--primary) !important;
+.examples-card .gr-button:hover {
+    background: rgba(139, 92, 246, 0.22) !important;
+    color: #A78BFA !important;
+    border-color: rgba(139, 92, 246, 0.5) !important;
+    transform: translateY(-1px) !important;
 }
 
-/* 状态显示 */
-.status-display {
-    color: var(--primary-light) !important;
-    font-size: 13px;
-    padding: 10px 16px;
-    background: rgba(139, 92, 246, 0.1) !important;
-    border-radius: 8px;
-    border: 1px solid rgba(139, 92, 246, 0.2);
-    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-}
-
-/* 进度显示 */
-.progress-display {
-    background: rgba(0,0,0,0.2) !important;
-    border-radius: 8px;
-    padding: 12px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-    max-height: 150px;
-    overflow-y: auto;
-    border: 1px solid var(--border-color);
-}
-
-/* 主按钮 - 渐变紫 */
-.btn-primary, button.primary, .gr-button.primary {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%) !important;
-    color: white !important;
-    border: none !important;
-    font-weight: 500 !important;
-    border-radius: var(--radius) !important;
-    height: 42px !important;
-    min-width: 120px !important;
-    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.25) !important;
-    transition: all 0.25s ease !important;
-}
-.btn-primary:hover, button.primary:hover, .gr-button.primary:hover {
-    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4) !important;
-    transform: translateY(-2px) !important;
-}
-
-/* 次级按钮 */
-.btn-secondary {
-    background: rgba(51, 65, 85, 0.5) !important;
-    color: var(--text-primary) !important;
-    border: 1px solid var(--border-color) !important;
-    border-radius: var(--radius) !important;
-    height: 42px !important;
-    transition: all 0.25s ease !important;
-}
-.btn-secondary:hover {
-    background: rgba(139, 92, 246, 0.2) !important;
-    border-color: var(--primary) !important;
-}
-
-/* 危险按钮 - 柔和红 */
-.btn-danger {
-    background: linear-gradient(135deg, #f87171 0%, var(--accent-red) 100%) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: var(--radius) !important;
-    height: 42px !important;
-    transition: all 0.25s ease !important;
-}
-.btn-danger:hover {
-    background: linear-gradient(135deg, #fca5a5 0%, #f87171 100%) !important;
-    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3) !important;
-    transform: translateY(-2px) !important;
-}
-
-/* 标签页 */
-.gr-tab {
-    font-weight: 500 !important;
-    color: var(--text-secondary) !important;
-    border-bottom: 2px solid transparent !important;
-    transition: all 0.2s !important;
-}
-.gr-tab:hover { color: var(--primary-light) !important; }
-.gr-tab.selected {
-    color: var(--primary-light) !important;
-    border-bottom-color: var(--primary) !important;
-}
-
-/* 输入框 */
-.gr-input, input[type="text"], .gr-text-input {
-    border-radius: var(--radius) !important;
-    border: 1px solid var(--border-color) !important;
-    padding: 12px 16px !important;
-    background: rgba(51, 65, 85, 0.3) !important;
-    color: var(--text-primary) !important;
-}
-.gr-input:focus, input[type="text"]:focus, .gr-text-input:focus {
-    border-color: var(--primary) !important;
-    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15) !important;
-}
-
-/* 聊天历史区域 */
+/* ── 聊天气泡 ── */
+.message-wrap,
+.chatbot,
 .chat-history {
-    background: rgba(15, 23, 42, 0.6) !important;
-    border-radius: var(--radius);
-    border: 1px solid var(--border-color);
-}
-
-/* Gradio内部容器覆写 */
-.gradio-container, .gradio-container-outer {
     background: transparent !important;
-}
-
-.gr-box, .gr-form, .container {
     border: none !important;
-    background: transparent !important;
-    box-shadow: none !important;
 }
-
-.gr-panel, .panel {
+.chatbot .message {
+    border-radius: 10px !important;
+    padding: 10px 14px !important;
+    font-size: 14px !important;
+    line-height: 1.65 !important;
+}
+.chatbot .message.bot,
+.bot-message,
+.assistant-message {
+    background: rgba(30, 41, 59, 0.85) !important;
+    border: 1px solid rgba(139, 92, 246, 0.15) !important;
+    color: #E2E8F0 !important;
+}
+.chatbot .message.user,
+.user-message {
+    background: linear-gradient(135deg, #7C3AED 0%, #8B5CF6 100%) !important;
+    color: #fff !important;
     border: none !important;
-    background: transparent !important;
 }
 
-/* Bot消息覆写 */
-.bot-message, .assistant-message {
+/* ── 文件上传 ── */
+.gr-file,
+.file-preview,
+[data-testid="file"] {
+    background: rgba(30, 41, 59, 0.5) !important;
+    border: 2px dashed rgba(139, 92, 246, 0.35) !important;
+    border-radius: var(--radius) !important;
+    transition: var(--transition) !important;
+    color: #94A3B8 !important;
+}
+.gr-file:hover,
+.file-preview:hover {
+    border-color: #8B5CF6 !important;
     background: rgba(139, 92, 246, 0.08) !important;
 }
-.user-message {
-    background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%) !important;
-    color: white !important;
+
+/* ── Textbox 标签、边框 ── */
+.label-wrap span,
+.block > label > span:first-child {
+    color: #94A3B8 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+}
+.block.gr-textbox,
+.block textarea {
+    background: rgba(30, 41, 59, 0.8) !important;
+    border-color: rgba(139, 92, 246, 0.25) !important;
+    color: #F1F5F9 !important;
 }
 
-/* 文件上传区域 */
-.gr-file, .file-preview {
-    background: rgba(51, 65, 85, 0.3) !important;
-    border: 2px dashed rgba(139, 92, 246, 0.4) !important;
-    border-radius: var(--radius) !important;
+/* ── Markdown / HTML 内容区 ── */
+.prose, .md {
+    color: #CBD5E1 !important;
 }
-.gr-file:hover, .file-preview:hover {
-    border-color: var(--primary) !important;
-    background: rgba(139, 92, 246, 0.1) !important;
+.prose h1, .prose h2, .prose h3, .prose h4 { color: #A78BFA !important; }
+.prose a { color: #8B5CF6 !important; }
+.prose code {
+    background: rgba(139, 92, 246, 0.12) !important;
+    color: #C4B5FD !important;
+    border-radius: 4px;
+    padding: 1px 5px;
+}
+.prose pre {
+    background: rgba(0,0,0,0.3) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--radius-sm) !important;
+}
+
+/* ── h3/h4 标题 ── */
+h3 {
+    color: #A78BFA;
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 10px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+h4 { color: #F1F5F9; font-size: 13px; font-weight: 500; margin: 10px 0 6px 0; }
+
+/* ── 页脚 ── */
+footer.svelte-1rjryqp,
+.footer {
+    display: none !important;
 }
 """
 
@@ -692,10 +844,18 @@ def create_ui():
     with gr.Blocks() as app:
         gr.HTML("""
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+          /* 额外强制覆盖：防止 macOS 系统主题渗透 */
+          @media (prefers-color-scheme: light) {
+            .gradio-container, body, html { background: #0F172A !important; color: #F1F5F9 !important; }
+          }
+        </style>
         <div class="main-container">
             <div class="header-section">
-                <h1>🎓 软件工程课程助手</h1>
-                <h2>基于大语言模型与知识图谱的智能学习辅助系统</h2>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <h1 style="margin:0;font-size:20px;font-weight:700;color:#fff;">🎓 软件工程课程助手</h1>
+                </div>
+                <h2 style="margin:0;font-size:12px;color:rgba(255,255,255,0.8);">基于大语言模型与知识图谱的智能学习辅助系统</h2>
             </div>
         """)
         
@@ -746,7 +906,7 @@ def create_ui():
                         with gr.Group(elem_classes=["card"]):
                             gr.HTML("<h4>🔄 检索进展</h4>")
                             progress_output = gr.HTML(
-                                value="<div class='progress-display'>等待输入...</div>",
+                                value="<div class='progress-display' style='color:#475569;'>⏳ 等待输入...</div>",
                                 elem_classes=["progress-display"]
                             )
                 
@@ -755,7 +915,7 @@ def create_ui():
                         # 知识图谱三元组显示
                         with gr.Group(elem_classes=["card"]):
                             gr.HTML("<h3>📚 知识图谱</h3>")
-                            kg_triples_output = gr.HTML(value="<div>等待输入...</div>")
+                            kg_triples_output = gr.HTML(value="<div style='color:#475569;font-size:13px;padding:8px 0;'>⏳ 等待问题输入...</div>")
                         
                         # 对话历史
                         with gr.Group(elem_classes=["card"]):
@@ -824,8 +984,8 @@ def create_ui():
         
         gr.HTML("""
         </div>
-        <footer style="text-align: center; margin: 20px 0; color: #9ca3af; font-size: 12px;">
-            Powered by LLM + Knowledge Graph + RAG | 软件工程课程专用学习助手
+        <footer style="text-align:center;margin:24px 0 12px 0;color:#334155;font-size:11.5px;letter-spacing:0.3px;">
+            Powered by LLM + Knowledge Graph + RAG &nbsp;|&nbsp; 软件工程课程专用学习助手
         </footer>
         """)
 
@@ -896,7 +1056,6 @@ def create_ui():
         )
         
         # 清空对话历史
-        
         clear_history_button.click(
             fn=clear_conversation,
             inputs=[chat_display],
@@ -921,37 +1080,119 @@ if __name__ == "__main__":
         logger.info("\nLaunching Gradio UI...")
         app = create_ui()
         app.queue()
+
+        # 构建主题：hue/size 在 __init__，设计 token 通过 .set() 设置
+        # 注意：gr.themes.Base() 不接受 token 参数，必须用 .set() 方法
+        _dark_theme = gr.themes.Base(
+            primary_hue=gr.themes.Color(
+                c50="#F5F3FF",
+                c100="#EDE9FE",
+                c200="#DDD6FE",
+                c300="#C4B5FD",
+                c400="#A78BFA",
+                c500="#8B5CF6",
+                c600="#7C3AED",
+                c700="#6D28D9",
+                c800="#5B21B6",
+                c900="#4C1D95",
+                c950="#2E1065",
+            ),
+            neutral_hue=gr.themes.Color(
+                c50="#F8FAFC",
+                c100="#F1F5F9",
+                c200="#E2E8F0",
+                c300="#CBD5E1",
+                c400="#94A3B8",
+                c500="#64748B",
+                c600="#475569",
+                c700="#334155",
+                c800="#1E293B",
+                c900="#0F172A",
+                c950="#020617",
+            ),
+            spacing_size=gr.themes.sizes.spacing_md,
+            radius_size=gr.themes.sizes.radius_md,
+        ).set(
+            # 强制暗色背景 token，防止 macOS Light Mode 渗透
+            body_background_fill="#0F172A",
+            body_background_fill_dark="#0F172A",
+            body_text_color="#F1F5F9",
+            body_text_color_dark="#F1F5F9",
+            body_text_color_subdued="#94A3B8",
+            body_text_color_subdued_dark="#94A3B8",
+            background_fill_primary="#0F172A",
+            background_fill_primary_dark="#0F172A",
+            background_fill_secondary="#1E293B",
+            background_fill_secondary_dark="#1E293B",
+            border_color_accent="#8B5CF6",
+            border_color_accent_dark="#8B5CF6",
+            border_color_primary="rgba(139,92,246,0.25)",
+            border_color_primary_dark="rgba(139,92,246,0.25)",
+            color_accent="#8B5CF6",
+            color_accent_soft="rgba(139,92,246,0.15)",
+            color_accent_soft_dark="rgba(139,92,246,0.15)",
+            link_text_color="#A78BFA",
+            link_text_color_dark="#A78BFA",
+            link_text_color_active="#C4B5FD",
+            link_text_color_active_dark="#C4B5FD",
+            link_text_color_hover="#C4B5FD",
+            link_text_color_hover_dark="#C4B5FD",
+            link_text_color_visited="#8B5CF6",
+            link_text_color_visited_dark="#8B5CF6",
+            block_background_fill="#1E293B",
+            block_background_fill_dark="#1E293B",
+            block_border_color="rgba(139,92,246,0.2)",
+            block_border_color_dark="rgba(139,92,246,0.2)",
+            block_label_background_fill="#1E293B",
+            block_label_background_fill_dark="#1E293B",
+            block_label_text_color="#94A3B8",
+            block_label_text_color_dark="#94A3B8",
+            block_title_text_color="#A78BFA",
+            block_title_text_color_dark="#A78BFA",
+            input_background_fill="rgba(30,41,59,0.8)",
+            input_background_fill_dark="rgba(30,41,59,0.8)",
+            input_border_color="rgba(139,92,246,0.25)",
+            input_border_color_dark="rgba(139,92,246,0.25)",
+            input_border_color_focus="#8B5CF6",
+            input_border_color_focus_dark="#8B5CF6",
+            input_placeholder_color="#475569",
+            input_placeholder_color_dark="#475569",
+            checkbox_background_color="#1E293B",
+            checkbox_background_color_dark="#1E293B",
+            checkbox_border_color="rgba(139,92,246,0.4)",
+            checkbox_border_color_dark="rgba(139,92,246,0.4)",
+            checkbox_label_background_fill="transparent",
+            checkbox_label_background_fill_dark="transparent",
+            table_even_background_fill="rgba(30,41,59,0.5)",
+            table_even_background_fill_dark="rgba(30,41,59,0.5)",
+            table_odd_background_fill="#1E293B",
+            table_odd_background_fill_dark="#1E293B",
+            stat_background_fill="rgba(139,92,246,0.1)",
+            stat_background_fill_dark="rgba(139,92,246,0.1)",
+            panel_background_fill="#1E293B",
+            panel_background_fill_dark="#1E293B",
+            panel_border_color="rgba(139,92,246,0.2)",
+            panel_border_color_dark="rgba(139,92,246,0.2)",
+            button_primary_background_fill="linear-gradient(135deg, #7C3AED, #8B5CF6)",
+            button_primary_background_fill_dark="linear-gradient(135deg, #7C3AED, #8B5CF6)",
+            button_primary_background_fill_hover="linear-gradient(135deg, #6D28D9, #7C3AED)",
+            button_primary_background_fill_hover_dark="linear-gradient(135deg, #6D28D9, #7C3AED)",
+            button_primary_text_color="#ffffff",
+            button_primary_text_color_dark="#ffffff",
+            button_secondary_background_fill="rgba(51,65,85,0.6)",
+            button_secondary_background_fill_dark="rgba(51,65,85,0.6)",
+            button_secondary_background_fill_hover="rgba(139,92,246,0.2)",
+            button_secondary_background_fill_hover_dark="rgba(139,92,246,0.2)",
+            button_secondary_text_color="#CBD5E1",
+            button_secondary_text_color_dark="#CBD5E1",
+            button_cancel_background_fill="linear-gradient(135deg, #B91C1C, #EF4444)",
+            button_cancel_background_fill_dark="linear-gradient(135deg, #B91C1C, #EF4444)",
+            button_cancel_text_color="#ffffff",
+            button_cancel_text_color_dark="#ffffff",
+        )
+
         app.launch(
             share=True,
-            theme=gr.themes.Base(
-                primary_hue=gr.themes.Color(
-                    c50="#F5F3FF",
-                    c100="#EDE9FE",
-                    c200="#DDD6FE",
-                    c300="#C4B5FD",
-                    c400="#A78BFA",
-                    c500="#8B5CF6",
-                    c600="#7C3AED",
-                    c700="#6D28D9",
-                    c800="#5B21B6",
-                    c900="#4C1D95",
-                    c950="#2E1065",
-                ),
-                neutral_hue=gr.themes.Color(
-                    c50="#F8FAFC",
-                    c100="#F1F5F9",
-                    c200="#E2E8F0",
-                    c300="#CBD5E1",
-                    c400="#94A3B8",
-                    c500="#64748B",
-                    c600="#475569",
-                    c700="#334155",
-                    c800="#1E293B",
-                    c900="#0F172A",
-                    c950="#020617",
-                ),
-                spacing_size=gr.themes.sizes.spacing_md,
-                radius_size=gr.themes.sizes.radius_md,
-            ),
+            theme=_dark_theme,
             css=custom_css
         )
